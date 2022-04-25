@@ -9,6 +9,7 @@ Using a synthetic dataset helps evaluate different machine learned models for no
 
 # Useful links
 <https://otexts.com/fpp2/arima.html>
+
 <https://www.seanabu.com/2016/03/22/time-series-seasonal-ARIMA-model-in-python/>
 
 
