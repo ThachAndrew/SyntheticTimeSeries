@@ -18,6 +18,8 @@ In an ARIMA model there are 3 parameters that are used to help model the major a
 
 <https://www.seanabu.com/2016/03/22/time-series-seasonal-ARIMA-model-in-python/>
 
+<https://towardsdatascience.com/creating-synthetic-time-series-data-67223ff08e34>
+
 
 
 
