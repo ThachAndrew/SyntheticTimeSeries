@@ -10,7 +10,7 @@ Using a synthetic dataset helps evaluate different machine learned models for no
 
 # Usage
 The provided Jupyter notebook helps the user visualize parameter tweaks.  The last cell should be the one that actually generates the synthetic data file. 
-In an ARIMA model there are 3 parameters that are used to help model the major aspects of a times series: seasonality, trend, and noise. These parameters are labeled p,d,and q.  
+In an ARIMA model there are 3 parameters that are used to help model the major aspects of a times series: seasonality, trend, and noise. These parameters are labeled linear_trend, seasonality, white_noise, weekday_factor. 
 
 # Useful links
 
