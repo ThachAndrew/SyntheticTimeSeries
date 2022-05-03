@@ -9,8 +9,12 @@ By using this, one can introduce noise and/or control other parameters, of a tim
 Using a synthetic dataset helps evaluate different machine learned models for noise and dynamic distribution shifts in time series data.  
 
 # Usage
-The provided Jupyter notebook helps the user visualize parameter tweaks.  The last cell should be the one that actually generates the synthetic data file. 
-In an ARIMA model there are 3 parameters that are used to help model the major aspects of a times series: seasonality, trend, and noise. These parameters are labeled linear_trend, seasonality, white_noise, weekday_factor. 
+
+The notebook consists of two parts.  
+- Data Generation
+	- This helps the user visualize parameter tweaks.  The last cell should be the one that actually generates the synthetic data file. 
+- AR fitting.  
+	- This attempts to create an ARIMA from the synthetic data
 
 # Useful links
 
