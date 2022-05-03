@@ -11,11 +11,10 @@ Using a synthetic dataset helps evaluate different machine learned models for no
 # Usage
 
 The notebook consists of two parts.  
-- Data Generation
-	- This helps the user visualize parameter tweaks.  The last cell should be the one that actually generates the synthetic data file. 
-    - Note that there are two ways to generate data: without or with regression.  The module "timeseries-generator" doesn't support regression.  Instead, we use ARMA-simulator from <https://github.com/igarizio/ARMA-simulator/blob/HEAD/ARMA.py>
-- AR fitting.  
-	- This attempts to create an ARIMA from the synthetic data
+- Data Generation without regression
+	- Uses the module "timeseries-generator", to help user visualize parameter tweaks.  The last cell should be the one that actually generates the synthetic data file. 
+- Data Generation with regression. 
+	- Uses ARMA-simulator from <https://github.com/igarizio/ARMA-simulator/blob/HEAD/ARMA.py>.  
 
 # Useful links
 
