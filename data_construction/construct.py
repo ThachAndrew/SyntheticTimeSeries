@@ -2,7 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from statsmodels.tsa.stattools import kpss, adfuller
 
-NUM_SERIES =  1000
+#NUM_SERIES =  1000
+NUM_SERIES =  200
 SERIES_LENGTH = 2000
 INITIAL_SEGMENT_SIZE = 60
 SEED = 55555
@@ -92,7 +93,13 @@ def main():
 
     for gen_series in series[30:40]:
         print(adfuller(gen_series[0]))
-        plt.plot(gen_series[0][100:200])
+        
+        #plt.plot(gen_series[0][100:200])
+        #plt.show()
+
+        non_normalized_series = gen_series[0][100:200]
+        normalized_series = [(float(i)-min(non_normalized_series))/(max(non_normalized_series)-min(non_normalized_series)) for i in non_normalized_series]
+        plt.plot(normalized_series)
         plt.show()
 
 if __name__ == '__main__':
