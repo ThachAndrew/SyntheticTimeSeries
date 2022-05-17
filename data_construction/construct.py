@@ -66,6 +66,12 @@ def generate_multiple_series(num_series, length, p, P, period, seed, enforce_sta
 
     return series, coefs
 
+# normalizes a series to a range of [0,1]
+def normalize(series):
+    min_element = min(series)
+    max_element = max(series)
+    return [(float(i)-min_element)/(max_element-min_element) for i in series]
+
 def main():
     P = 1
     p = 1
@@ -94,12 +100,11 @@ def main():
     for gen_series in series[30:40]:
         print(adfuller(gen_series[0]))
         
+        # non-normalized version
         #plt.plot(gen_series[0][100:200])
         #plt.show()
 
-        non_normalized_series = gen_series[0][100:200]
-        normalized_series = [(float(i)-min(non_normalized_series))/(max(non_normalized_series)-min(non_normalized_series)) for i in non_normalized_series]
-        plt.plot(normalized_series)
+        plt.plot(normalize(gen_series[0][100:200]))
         plt.show()
 
 if __name__ == '__main__':
