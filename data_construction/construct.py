@@ -133,6 +133,12 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
         open(os.path.join(forecast_window_dir, "commands.txt"), "w").write(
             command_constructor.create_forecast_window_commands(generated_series, series_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx))
 
+# normalizes a series to a range of [0,1]
+def normalize(series):
+    min_element = min(series)
+    max_element = max(series)
+    return [(float(i)-min_element)/(max_element-min_element) for i in series]
+
 def main():
     P = 0
     p = 2
@@ -153,6 +159,7 @@ def main():
     forecast_window_dirs = [str(time_step).zfill(3) for time_step in range(num_windows)]
 
     build_psl_data(generated_series, num_windows, experiment_dir, forecast_window_dirs)
+
 
 if __name__ == '__main__':
     main()
