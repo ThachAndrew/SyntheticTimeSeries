@@ -1,6 +1,7 @@
 import command_constructor
 import predicate_constructors
 import estimate_AR_coefs
+import time_series_noise
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,6 +17,9 @@ SERIES_LENGTH = INITIAL_SEGMENT_SIZE + (NUM_FORECAST_WINDOWS) * WINDOW_SIZE
 
 SEED = 55555
 REGEN_SEED_MAX = 10 ** 8
+
+GAUSSIAN_NOISE_MU = 0
+GAUSSIAN_NOISE_SIGMA = 2
 
 DATA_PATH = "data"
 
@@ -90,8 +94,15 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
     if not os.path.exists(initial_window_dir):
         os.makedirs(initial_window_dir)
 
-    predicate_constructors.lag_n_predicate(1, 1, SERIES_LENGTH - 1,
+    predicate_constructors.lag_n_predicate(1, 0, SERIES_LENGTH - 1,
                                            os.path.join(initial_window_dir, "Lag1_obs.txt"))
+    predicate_constructors.lag_n_predicate(2, 0, SERIES_LENGTH - 1,
+                                           os.path.join(initial_window_dir, "Lag2_obs.txt"))
+    predicate_constructors.lag_n_predicate(1, 0, int(SERIES_LENGTH/WINDOW_SIZE),
+                                           os.path.join(initial_window_dir, "PeriodLag1_obs.txt"))
+    predicate_constructors.lag_n_predicate(2, 0, int(SERIES_LENGTH/WINDOW_SIZE),
+                                           os.path.join(initial_window_dir, "PeriodLag2_obs.txt"))
+
     predicate_constructors.time_in_aggregate_window_predicate(0, SERIES_LENGTH - 1, WINDOW_SIZE,
                                                               os.path.join(initial_window_dir,
                                                                            "IsInWindow_obs.txt"))
@@ -153,9 +164,16 @@ def main():
         test_series += [5, 10]
 
     generated_series = np.append(generated_series, [test_series], axis=0)
+    coefs = np.append(coefs, [[0, 0]], axis=0)
+
+    for series_idx in range(len(generated_series)):
+        generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], GAUSSIAN_NOISE_MU, GAUSSIAN_NOISE_SIGMA, SEED)
+        generated_series[series_idx] = normalize(generated_series[series_idx])
+        print(coefs[series_idx])
+        estimate_AR_coefs.fit_AR_model(generated_series[series_idx], 0, 4*INITIAL_SEGMENT_SIZE, [1, 2])
 
     num_windows = NUM_FORECAST_WINDOWS
-    experiment_dir = os.path.join(DATA_PATH, "test_experiment")
+    experiment_dir = os.path.join(DATA_PATH, "test_experiment", "eval")
     forecast_window_dirs = [str(time_step).zfill(3) for time_step in range(num_windows)]
 
     build_psl_data(generated_series, num_windows, experiment_dir, forecast_window_dirs)

@@ -4,7 +4,7 @@ def lag_n_predicate(n, start, end, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
 
-    for time_step in range(start, end + 1):
+    for time_step in range(start + n, end + 1):
         out_file_lines += str(time_step) + "\t" + str(time_step - n) + "\n"
 
     out_file_handle.write(out_file_lines)
