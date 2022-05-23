@@ -7,9 +7,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 from statsmodels.tsa.stattools import kpss, adfuller
+from statsmodels.graphics.tsaplots import plot_acf
 
-NUM_SERIES =  10
-INITIAL_SEGMENT_SIZE = 100
+NUM_SERIES_GENERATED = 1000
+VARIANCE_LOWER_PERCENTILE = 0.4
+VARIANCE_UPPER_PERCENTILE = 0.6
+NUM_SERIES = int(np.rint(NUM_SERIES_GENERATED * (VARIANCE_UPPER_PERCENTILE - VARIANCE_LOWER_PERCENTILE)))
+
+INITIAL_SEGMENT_SIZE = 500
 NUM_FORECAST_WINDOWS = 100
 WINDOW_SIZE = 10
 
@@ -22,6 +27,7 @@ GAUSSIAN_NOISE_MU = 0
 GAUSSIAN_NOISE_SIGMA = 2
 
 DATA_PATH = "data"
+MODEL_PATH = "timeseries_models"
 
 def generate_wn(n, sigma=1):
     return np.random.normal(0, sigma, size=n)
@@ -103,6 +109,8 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
     predicate_constructors.lag_n_predicate(2, 0, int(SERIES_LENGTH/WINDOW_SIZE),
                                            os.path.join(initial_window_dir, "PeriodLag2_obs.txt"))
 
+    predicate_constructors.series_block_predicate(series_ids, os.path.join(initial_window_dir, "SeriesBlock_obs.txt"))
+
     predicate_constructors.time_in_aggregate_window_predicate(0, SERIES_LENGTH - 1, WINDOW_SIZE,
                                                               os.path.join(initial_window_dir,
                                                                            "IsInWindow_obs.txt"))
@@ -124,7 +132,7 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
         command_constructor.create_forecast_window_commands(generated_series, series_ids, INITIAL_SEGMENT_SIZE,
                                                             INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE, 0))
 
-    for window_idx in range(1, num_windows - 1):
+    for window_idx in range(1, num_windows):
         forecast_window_dir = os.path.join(experiment_dir, forecast_window_dirs[window_idx])
 
         if not os.path.exists(forecast_window_dir):
@@ -157,20 +165,38 @@ def main():
 
     np.random.seed(SEED)
 
-    generated_series, coefs = generate_multiple_series(NUM_SERIES, SERIES_LENGTH, p, P, period, seed=SEED)
+    generated_series, coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED)
+    generated_series_var = [np.var(series) for series in generated_series]
 
-    test_series = []
-    for x in range(int(SERIES_LENGTH / 2)):
-        test_series += [5, 10]
+    upper_var_threshold = np.quantile(generated_series_var, VARIANCE_UPPER_PERCENTILE)
+    lower_var_threshold = np.quantile(generated_series_var, VARIANCE_LOWER_PERCENTILE)
 
-    generated_series = np.append(generated_series, [test_series], axis=0)
-    coefs = np.append(coefs, [[0, 0]], axis=0)
+    generated_series = [series for series in generated_series if lower_var_threshold <= np.var(series) <= upper_var_threshold]
+
+    hts_model_file = open(os.path.join(MODEL_PATH, "hierarchical_ar_" + str(p), "hts.psl"), "w")
+    hts_model_lines = ""
 
     for series_idx in range(len(generated_series)):
-        generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], GAUSSIAN_NOISE_MU, GAUSSIAN_NOISE_SIGMA, SEED)
+        #print("Processing series " + str(series_idx))
+        #generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], GAUSSIAN_NOISE_MU, GAUSSIAN_NOISE_SIGMA, SEED)
         generated_series[series_idx] = normalize(generated_series[series_idx])
-        print(coefs[series_idx])
-        estimate_AR_coefs.fit_AR_model(generated_series[series_idx], 0, 4*INITIAL_SEGMENT_SIZE, [1, 2])
+        estimated_ar_coefs, intercept = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], 100, INITIAL_SEGMENT_SIZE, [1, 2])
+
+
+        for idx, coef in enumerate(estimated_ar_coefs[:-1]):
+            if coef > 0:
+                hts_model_lines += str(coef) + ": Series(S, T) - Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
+            else:
+                hts_model_lines += str(-1 * coef) + ": Series(S, T) + Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
+
+            hts_model_lines += "\n"
+
+        if intercept > 0:
+            hts_model_lines += str(intercept/2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 1.0\n"
+        else:
+            hts_model_lines += str(intercept / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '" + str(series_idx) + "') = 0.0\n"
+
+    hts_model_file.write(hts_model_lines)
 
     num_windows = NUM_FORECAST_WINDOWS
     experiment_dir = os.path.join(DATA_PATH, "test_experiment", "eval")

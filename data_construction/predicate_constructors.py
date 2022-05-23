@@ -26,6 +26,15 @@ def series_predicate(series_list, series_ids, start_index, end_index, out_path, 
 
     out_file_handle.write(out_file_lines)
 
+def series_block_predicate(series_ids, out_path):
+    out_file_handle = open(out_path, "w")
+    out_file_lines = ""
+
+    for series_id in series_ids:
+        out_file_lines += str(series_id) + "\t" + str(series_id) + "\n"
+
+    out_file_handle.write(out_file_lines)
+
 # The end index is one after the last time step we're including in the aggregation windows
 def time_in_aggregate_window_predicate(start_index, end_index, window_size, out_path):
     out_file_handle = open(out_path, "w")

@@ -15,11 +15,15 @@ def fit_AR_model(series, start, end, lags):
         for lag in lags:
             ts_train_lagged_values += [series[ts - lag]]
 
+        # bias
+        ts_train_lagged_values += [1]
+
         train_lagged_values += [ts_train_lagged_values]
+
 
     AR_model = LinearRegression().fit(train_lagged_values, train_series)
 
-    print(AR_model.coef_)
+    return AR_model.coef_, AR_model.intercept_
 
 def generate_aggregate_series(series, start_index, end_index, window_size):
     agg_series = np.array([])

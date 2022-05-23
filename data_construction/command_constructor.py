@@ -56,6 +56,9 @@ def create_forecast_window_commands(all_series, series_ids, start, end, window_s
     for idx, series in enumerate(all_series):
         for timestep in range(start, end + 1):
                 command_lines += create_command_line(ADD, TARGET, "Series", [series_ids[idx], timestep], None) + "\n"
-                command_lines += create_command_line(ADD, TRUTH, "Series", [series_ids[idx], timestep], series[timestep]) + "\n"
+               # command_lines += create_command_line(ADD, TRUTH, "Series", [series_ids[idx], timestep], series[timestep]) + "\n"
+
+    command_lines += WRITE_INFERRED_COMMAND + "\t'inferred-predicates/" + str(forecast_window_idx).zfill(3) + "'\n"
+    command_lines += "Exit\n"
 
     return command_lines
