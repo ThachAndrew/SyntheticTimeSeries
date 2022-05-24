@@ -183,7 +183,7 @@ def main():
         estimated_ar_coefs, intercept = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], 100, INITIAL_SEGMENT_SIZE, [1, 2])
 
 
-        for idx, coef in enumerate(estimated_ar_coefs[:-1]):
+        for idx, coef in enumerate(estimated_ar_coefs):
             if coef > 0:
                 hts_model_lines += str(coef) + ": Series(S, T) - Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
             else:

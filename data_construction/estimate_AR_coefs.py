@@ -15,11 +15,7 @@ def fit_AR_model(series, start, end, lags):
         for lag in lags:
             ts_train_lagged_values += [series[ts - lag]]
 
-        # bias
-        ts_train_lagged_values += [1]
-
         train_lagged_values += [ts_train_lagged_values]
-
 
     AR_model = LinearRegression().fit(train_lagged_values, train_series)
 
