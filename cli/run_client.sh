@@ -6,8 +6,8 @@
 
 readonly PSL_VERSION="2.3.0-SNAPSHOT"
 readonly JAR_PATH="./psl-client-cli-${PSL_VERSION}.jar"
-readonly COMMAND_FILE='../data//test_experiment/eval//000/commands.txt'
-readonly SERVER_RESPONSE_OUTPUT='./client_output/000/serverResponses.txt'
+readonly COMMAND_FILE='../data//test_experiment/eval//014/commands.txt'
+readonly SERVER_RESPONSE_OUTPUT='./client_output/014/serverResponses.txt'
 
 readonly ADDITIONAL_PSL_OPTIONS='--int-ids --onlineClient -D runtimestats.collect=true'
 readonly ADDITIONAL_CLIENT_OPTIONS='-D log4j.threshold=TRACE'
