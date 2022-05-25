@@ -2,6 +2,7 @@ import command_constructor
 import predicate_constructors
 import estimate_AR_coefs
 import time_series_noise
+from ar_forecast import ar_forecast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +15,7 @@ VARIANCE_LOWER_PERCENTILE = 0.4
 VARIANCE_UPPER_PERCENTILE = 0.6
 NUM_SERIES = int(np.rint(NUM_SERIES_GENERATED * (VARIANCE_UPPER_PERCENTILE - VARIANCE_LOWER_PERCENTILE)))
 
-INITIAL_SEGMENT_SIZE = 500
+INITIAL_SEGMENT_SIZE = 1000
 NUM_FORECAST_WINDOWS = 100
 WINDOW_SIZE = 10
 
@@ -24,7 +25,7 @@ SEED = 55555
 REGEN_SEED_MAX = 10 ** 8
 
 GAUSSIAN_NOISE_MU = 0
-GAUSSIAN_NOISE_SIGMA = 2
+GAUSSIAN_NOISE_SIGMA = 1
 
 DATA_PATH = "data"
 MODEL_PATH = "timeseries_models"
@@ -82,12 +83,11 @@ def generate_multiple_series(num_series, length, p, P, period, seed, enforce_sta
                 char_polynomial = np.append(1, all_coefs)[::-1]
 
         coefs[x] = all_coefs
-        series[x]  = np.array([generate_ar(length, all_coefs)])
+        series[x] = np.array([generate_ar(length, all_coefs)])
 
     return series, coefs
 
-# TODO @Alex: estimate AR coefficients, automate constructing the PSL model
-def build_psl_data(generated_series, num_windows, experiment_dir, forecast_window_dirs):
+def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_dir, forecast_window_dirs):
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
 
@@ -100,6 +100,7 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
     if not os.path.exists(initial_window_dir):
         os.makedirs(initial_window_dir)
 
+    # Time step and window lags
     predicate_constructors.lag_n_predicate(1, 0, SERIES_LENGTH - 1,
                                            os.path.join(initial_window_dir, "Lag1_obs.txt"))
     predicate_constructors.lag_n_predicate(2, 0, SERIES_LENGTH - 1,
@@ -109,17 +110,24 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
     predicate_constructors.lag_n_predicate(2, 0, int(SERIES_LENGTH/WINDOW_SIZE),
                                            os.path.join(initial_window_dir, "PeriodLag2_obs.txt"))
 
+    # Series block for specialization
     predicate_constructors.series_block_predicate(series_ids, os.path.join(initial_window_dir, "SeriesBlock_obs.txt"))
 
+    # Assign times to windows for use in hierarchical rule, IsInWindow predicate
     predicate_constructors.time_in_aggregate_window_predicate(0, SERIES_LENGTH - 1, WINDOW_SIZE,
                                                               os.path.join(initial_window_dir,
                                                                            "IsInWindow_obs.txt"))
+
+    # AR Baseline; not used in model, but used for evaluation.
+    predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
+                                                 os.path.join(initial_window_dir,  "ARBaseline_obs.txt"))
 
     # First time step series values
     predicate_constructors.series_predicate(generated_series, series_ids, 0, INITIAL_SEGMENT_SIZE - 1,
                                             os.path.join(initial_window_dir, "Series_obs.txt"),
                                             include_values=True)
 
+    # Truth & targets for initial forecast window
     predicate_constructors.series_predicate(generated_series, series_ids, INITIAL_SEGMENT_SIZE, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1,
                                             os.path.join(initial_window_dir, "Series_target.txt"),
                                             include_values=False)
@@ -128,6 +136,7 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
                                             os.path.join(initial_window_dir, "Series_truth.txt"),
                                             include_values=True)
 
+    # First forecast window commands.
     open(os.path.join(initial_window_dir, "commands.txt"), "w").write(
         command_constructor.create_forecast_window_commands(generated_series, series_ids, INITIAL_SEGMENT_SIZE,
                                                             INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE, 0))
@@ -149,6 +158,11 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
                                                 os.path.join(forecast_window_dir, "Series_truth.txt"),
                                                 include_values=True)
 
+        # AR Baseline; not used in model, but used for evaluation.
+        predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, 0,
+                                                     start_time_step - 1, WINDOW_SIZE,
+                                                     os.path.join(forecast_window_dir, "ARBaseline_obs.txt"))
+
         open(os.path.join(forecast_window_dir, "commands.txt"), "w").write(
             command_constructor.create_forecast_window_commands(generated_series, series_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx))
 
@@ -156,6 +170,7 @@ def build_psl_data(generated_series, num_windows, experiment_dir, forecast_windo
 def normalize(series):
     min_element = min(series)
     max_element = max(series)
+
     return [(float(i)-min_element)/(max_element-min_element) for i in series]
 
 def main():
@@ -163,26 +178,47 @@ def main():
     p = 2
     period = 10
 
+    # Generate random AR data
     np.random.seed(SEED)
-
     generated_series, coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED)
     generated_series_var = [np.var(series) for series in generated_series]
 
-    upper_var_threshold = np.quantile(generated_series_var, VARIANCE_UPPER_PERCENTILE)
-    lower_var_threshold = np.quantile(generated_series_var, VARIANCE_LOWER_PERCENTILE)
+    # Compute upper and lower variance thresholds, which requires discarding inf. or undef. variance series
+    upper_var_threshold = np.quantile([var for var in generated_series_var if (not np.isnan(var) and not np.isinf(var))], VARIANCE_UPPER_PERCENTILE)
+    lower_var_threshold = np.quantile([var for var in generated_series_var if (not np.isnan(var) and not np.isinf(var))], VARIANCE_LOWER_PERCENTILE)
 
-    generated_series = [series for series in generated_series if lower_var_threshold <= np.var(series) <= upper_var_threshold]
+    # Filter out series that aren't between the two thresholds.
+    filtered_generated_series = []
+    filtered_coefs = []
 
+    for series_idx, series in enumerate(generated_series):
+        if np.isnan(np.var(series)) or np.isinf(np.var(series)):
+            continue
+
+        if lower_var_threshold <= np.var(series) and np.var(series) <= upper_var_threshold:
+            filtered_generated_series += [series]
+            filtered_coefs += [coefs[series_idx]]
+
+    generated_series = filtered_generated_series
+
+    coefs_and_biases = [[] for series in generated_series]
+
+    # Generate model with hierarchical and AR rules
     hts_model_file = open(os.path.join(MODEL_PATH, "hierarchical_ar_" + str(p), "hts.psl"), "w")
-    hts_model_lines = ""
+    hts_model_lines = "Series(S, +T) / " + str(period) + " = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + "1.0: AggSeries(S, P) + 0.0 * PeriodLag1(P, P_Lag1) = AggSeries(S, P_Lag1) ^2\n\n"
 
     for series_idx in range(len(generated_series)):
-        #print("Processing series " + str(series_idx))
-        #generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], GAUSSIAN_NOISE_MU, GAUSSIAN_NOISE_SIGMA, SEED)
+        # Add extra noise to series, then normalize
+        generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], GAUSSIAN_NOISE_MU, GAUSSIAN_NOISE_SIGMA, SEED)
         generated_series[series_idx] = normalize(generated_series[series_idx])
-        estimated_ar_coefs, intercept = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], 100, INITIAL_SEGMENT_SIZE, [1, 2])
 
+        # Estimate AR coefficients/bias
+        estimated_ar_coefs, bias = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], 0, INITIAL_SEGMENT_SIZE, [1, 2])
+        coefs_and_biases[series_idx] = [estimated_ar_coefs, bias]
 
+        hts_model_lines += "#Series " + str(series_idx) + "\n"
+
+        # Create AR rules
         for idx, coef in enumerate(estimated_ar_coefs):
             if coef > 0:
                 hts_model_lines += str(coef) + ": Series(S, T) - Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
@@ -191,19 +227,20 @@ def main():
 
             hts_model_lines += "\n"
 
-        if intercept > 0:
-            hts_model_lines += str(intercept/2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 1.0\n"
+        # Bias rule
+        if bias > 0:
+            hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 1.0\n"
         else:
-            hts_model_lines += str(intercept / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '" + str(series_idx) + "') = 0.0\n"
+            hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '" + str(series_idx) + "') = 0.0\n"
+
+        hts_model_lines += "\n"
 
     hts_model_file.write(hts_model_lines)
 
-    num_windows = NUM_FORECAST_WINDOWS
+    # Set up first experiment
     experiment_dir = os.path.join(DATA_PATH, "test_experiment", "eval")
-    forecast_window_dirs = [str(time_step).zfill(3) for time_step in range(num_windows)]
-
-    build_psl_data(generated_series, num_windows, experiment_dir, forecast_window_dirs)
-
+    forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
+    build_psl_data(generated_series, coefs_and_biases, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
 
 if __name__ == '__main__':
     main()
