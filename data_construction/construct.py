@@ -191,6 +191,7 @@ def main():
     filtered_generated_series = []
     filtered_coefs = []
 
+
     for series_idx, series in enumerate(generated_series):
         if np.isnan(np.var(series)) or np.isinf(np.var(series)):
             continue
