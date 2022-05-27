@@ -6,13 +6,13 @@
 
 readonly PSL_VERSION="2.3.0-SNAPSHOT"
 readonly JAR_PATH="./psl-client-cli-${PSL_VERSION}.jar"
-readonly COMMAND_FILE='../data//test_experiment/eval//014/commands.txt'
-readonly SERVER_RESPONSE_OUTPUT='./client_output/014/serverResponses.txt'
+readonly COMMAND_FILE='./stop_command.txt'
+readonly SERVER_RESPONSE_OUTPUT='./client_output/stop/serverResponses.txt'
 
 readonly ADDITIONAL_PSL_OPTIONS='--int-ids --onlineClient -D runtimestats.collect=true'
 readonly ADDITIONAL_CLIENT_OPTIONS='-D log4j.threshold=TRACE'
 readonly MAX_CONNECTION_ATTEMPTS=100
-readonly CONNECTION_ATTEMPT_SLEEP_SEC=10
+readonly CONNECTION_ATTEMPT_SLEEP_SEC=1
 
 function main() {
    trap exit SIGINT SIGTERM

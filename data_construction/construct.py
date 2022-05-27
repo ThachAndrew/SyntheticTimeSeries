@@ -16,8 +16,8 @@ VARIANCE_UPPER_PERCENTILE = 0.6
 NUM_SERIES = int(np.rint(NUM_SERIES_GENERATED * (VARIANCE_UPPER_PERCENTILE - VARIANCE_LOWER_PERCENTILE)))
 
 INITIAL_SEGMENT_SIZE = 1000
-NUM_FORECAST_WINDOWS = 100
-WINDOW_SIZE = 10
+NUM_FORECAST_WINDOWS = 30
+WINDOW_SIZE = 20
 
 SERIES_LENGTH = INITIAL_SEGMENT_SIZE + (NUM_FORECAST_WINDOWS) * WINDOW_SIZE
 
@@ -206,7 +206,7 @@ def main():
 
     # Generate model with hierarchical and AR rules
     hts_model_file = open(os.path.join(MODEL_PATH, "hierarchical_ar_" + str(p), "hts.psl"), "w")
-    hts_model_lines = "Series(S, +T) / " + str(period) + " = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + "1.0: AggSeries(S, P) + 0.0 * PeriodLag1(P, P_Lag1) = AggSeries(S, P_Lag1) ^2\n\n"
+    hts_model_lines = "Series(S, +T) / |T| = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + "1.0: AggSeries(S, P) + 0.0 * PeriodLag1(P, P_Lag1) = AggSeries(S, P_Lag1) ^2\n\n"
 
     for series_idx in range(len(generated_series)):
         # Add extra noise to series, then normalize
@@ -216,7 +216,12 @@ def main():
         # Estimate AR coefficients/bias
         estimated_ar_coefs, bias = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], 0, INITIAL_SEGMENT_SIZE, [1, 2])
         coefs_and_biases[series_idx] = [estimated_ar_coefs, bias]
+        hts_model_lines += "1.0: Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = "
+        for idx, coef in enumerate(estimated_ar_coefs):
+            hts_model_lines += str(coef) + " * Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ")  + "
 
+        hts_model_lines += str(bias) + " ^2 \n"
+        """
         hts_model_lines += "#Series " + str(series_idx) + "\n"
 
         # Create AR rules
@@ -235,7 +240,7 @@ def main():
             hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '" + str(series_idx) + "') = 0.0\n"
 
         hts_model_lines += "\n"
-
+        """
     hts_model_file.write(hts_model_lines)
 
     # Set up first experiment
