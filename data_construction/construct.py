@@ -127,6 +127,9 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
                                             os.path.join(initial_window_dir, "Series_obs.txt"),
                                             include_values=True)
 
+    predicate_constructors.agg_series_predicate(series_ids, 0, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE,
+                                                os.path.join(initial_window_dir, "AggSeries_target.txt"))
+
     # Truth & targets for initial forecast window
     predicate_constructors.series_predicate(generated_series, series_ids, INITIAL_SEGMENT_SIZE, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1,
                                             os.path.join(initial_window_dir, "Series_target.txt"),
@@ -139,7 +142,7 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
     # First forecast window commands.
     open(os.path.join(initial_window_dir, "commands.txt"), "w").write(
         command_constructor.create_forecast_window_commands(generated_series, series_ids, INITIAL_SEGMENT_SIZE,
-                                                            INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE, 0))
+                                                            INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE, 0, int(np.rint(INITIAL_SEGMENT_SIZE / WINDOW_SIZE))))
 
     for window_idx in range(1, num_windows):
         forecast_window_dir = os.path.join(experiment_dir, forecast_window_dirs[window_idx])
@@ -164,7 +167,8 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
                                                      os.path.join(forecast_window_dir, "ARBaseline_obs.txt"))
 
         open(os.path.join(forecast_window_dir, "commands.txt"), "w").write(
-            command_constructor.create_forecast_window_commands(generated_series, series_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx))
+            command_constructor.create_forecast_window_commands(generated_series, series_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx,
+                                                                int(np.rint(INITIAL_SEGMENT_SIZE / WINDOW_SIZE)) + window_idx))
 
 # normalizes a series to a range of [0,1]
 def normalize(series):
