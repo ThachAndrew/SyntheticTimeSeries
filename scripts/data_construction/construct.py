@@ -4,22 +4,30 @@ import estimate_AR_coefs
 import time_series_noise
 from ar_forecast import ar_forecast
 
+from matplotlib.collections import LineCollection
+from matplotlib.colors import ListedColormap
+
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-from statsmodels.tsa.stattools import kpss, adfuller
+from statsmodels.tsa.stattools import kpss, adfuller, acf, pacf
 from statsmodels.graphics.tsaplots import plot_acf
 
-NUM_SERIES_GENERATED = 1000
-VARIANCE_LOWER_PERCENTILE = 0.4
-VARIANCE_UPPER_PERCENTILE = 0.6
+import math
+
+NUM_SERIES_GENERATED = 100
+VARIANCE_LOWER_PERCENTILE = 20
+VARIANCE_UPPER_PERCENTILE = 80
 NUM_SERIES = int(np.rint(NUM_SERIES_GENERATED * (VARIANCE_UPPER_PERCENTILE - VARIANCE_LOWER_PERCENTILE)))
+WINDOW_SIZE = 30
 
 INITIAL_SEGMENT_SIZE = 1000
+INITIAL_SEGMENT_SIZE += (WINDOW_SIZE - (INITIAL_SEGMENT_SIZE % WINDOW_SIZE))
 NUM_FORECAST_WINDOWS = 30
-WINDOW_SIZE = 20
 
 SERIES_LENGTH = INITIAL_SEGMENT_SIZE + (NUM_FORECAST_WINDOWS) * WINDOW_SIZE
+
+MIN_VARIANCE = 10 ** -2
 
 SEED = 55555
 REGEN_SEED_MAX = 10 ** 8
@@ -68,22 +76,27 @@ def generate_multiple_series(num_series, length, p, P, period, seed, enforce_sta
     np.random.seed(seed)
 
     for x in range(num_series):
-        ar_coefs = [(x - 0.5) * 2 for x in np.random.rand(p)]
-        sar_coefs = [(x - 0.5) * 2 for x in np.random.rand(P)]
+        var = np.NAN
 
-        all_coefs = generate_sar_phis(ar_coefs, sar_coefs, P, period)
-        char_polynomial = np.append(1, all_coefs)[::-1]
+        while np.isnan(var) or np.isinf(var) or var < MIN_VARIANCE:
+            ar_coefs = [(x - 0.5) * 2 for x in np.random.rand(p)]
+            sar_coefs = [(x - 0.5) * 2 for x in np.random.rand(P)]
 
-        if enforce_stationarity:
-            while np.min(np.abs(np.roots(char_polynomial))) < 1:
-                ar_coefs = [(x - 0.5) * 2 for x in np.random.rand(p)]
-                sar_coefs = [(x - 0.5) * 2 for x in np.random.rand(P)]
+            all_coefs = generate_sar_phis(ar_coefs, sar_coefs, P, period)
+            char_polynomial = np.append(1, all_coefs)[::-1]
 
-                all_coefs = generate_sar_phis(ar_coefs, sar_coefs, P, period)
-                char_polynomial = np.append(1, all_coefs)[::-1]
+            if enforce_stationarity:
+                while np.min(np.abs(np.roots(char_polynomial))) < 1:
+                    ar_coefs = [(x - 0.5) * 2 for x in np.random.rand(p)]
+                    sar_coefs = [(x - 0.5) * 2 for x in np.random.rand(P)]
 
-        coefs[x] = all_coefs
-        series[x] = np.array([generate_ar(length, all_coefs)])
+                    all_coefs = generate_sar_phis(ar_coefs, sar_coefs, P, period)
+                    char_polynomial = np.append(1, all_coefs)[::-1]
+
+            coefs[x] = all_coefs
+            series[x] = np.array([generate_ar(length, all_coefs)])
+
+            var = np.var(series[x])
 
     return series, coefs
 
@@ -122,11 +135,18 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
     predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
                                                  os.path.join(initial_window_dir,  "ARBaseline_obs.txt"))
 
+    #print(generated_series)
+    #exit(1)
     # First time step series values
     predicate_constructors.series_predicate(generated_series, series_ids, 0, INITIAL_SEGMENT_SIZE - 1,
                                             os.path.join(initial_window_dir, "Series_obs.txt"),
                                             include_values=True)
 
+    agg_series = [predicate_constructors.generate_aggregate_series(series, 0, SERIES_LENGTH - 1, WINDOW_SIZE) for series in generated_series]
+    #print(agg_series[])
+    predicate_constructors.oracle_series_predicate(agg_series, series_ids, 0, int(round((SERIES_LENGTH/WINDOW_SIZE))) - 1, 0.01, os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
+
+    #exit(1)
     predicate_constructors.agg_series_predicate(series_ids, 0, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE,
                                                 os.path.join(initial_window_dir, "AggSeries_target.txt"))
 
@@ -170,6 +190,35 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
             command_constructor.create_forecast_window_commands(generated_series, series_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx,
                                                                 int(np.rint(INITIAL_SEGMENT_SIZE / WINDOW_SIZE)) + window_idx))
 
+def fit_ar_models(generated_series, start_idx, end_idx, lags):
+    coefs_and_biases = dict()
+
+    for series_idx in range(len(generated_series)):
+        estimated_ar_coefs, bias = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], start_idx, end_idx,
+                                                              lags)
+        coefs_and_biases[series_idx] = [estimated_ar_coefs, bias]
+
+    return coefs_and_biases
+
+def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, hierarchical_rule_weight=1.0):
+    # Generate model with hierarchical and AR rules
+    hts_model_file = open(os.path.join(MODEL_PATH, str(model_name) + ".psl"), "w")
+    hts_model_lines = "Series(S, +T) / |T| = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + str(hierarchical_rule_weight) + ": AggSeries(S, P) = OracleSeries(S, P_Lag1) ^2\n\n"
+
+    for series_idx in range(len(generated_series)):
+        estimated_ar_coefs, bias = coefs_and_biases[series_idx]
+
+        hts_model_lines += "1.0: Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = "
+
+        for idx, coef in enumerate(estimated_ar_coefs):
+            hts_model_lines += str(coef) + " * Series(S, T_Lag" + str(lags[idx]) + ") + 0.0 * Lag" + str(lags[idx]) + "(T, T_Lag" + str(lags[idx]) + ")  + "
+
+        hts_model_lines += str(bias) + " ^2 \n"
+
+    hts_model_file.write(hts_model_lines)
+
+    return coefs_and_biases
+
 # normalizes a series to a range of [0,1]
 def normalize(series):
     min_element = min(series)
@@ -178,74 +227,55 @@ def normalize(series):
     return [(float(i)-min_element)/(max_element-min_element) for i in series]
 
 def main():
+    # Order of (S)AR model
     P = 0
     p = 2
-    period = 10
+    period = 30
+
+    # Controls Gaussian noise to be added to every generated series
+    add_noise = True
+    noise_mu = 0
+    noise_sigma = 1
+
+    # Lags present in the (S)AR model, computed from its order.
+    lags = np.zeros(p + P)
+    lags[:p] = np.arange(p) + 1
+    lags[p:] = period * (np.arange(P) + 1)
+    lags = lags.astype(int)
 
     # Generate random AR data
     np.random.seed(SEED)
-    generated_series, coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED)
-    generated_series_var = [np.var(series) for series in generated_series]
-
-    # Compute upper and lower variance thresholds, which requires discarding inf. or undef. variance series
-    upper_var_threshold = np.quantile([var for var in generated_series_var if (not np.isnan(var) and not np.isinf(var))], VARIANCE_UPPER_PERCENTILE)
-    lower_var_threshold = np.quantile([var for var in generated_series_var if (not np.isnan(var) and not np.isinf(var))], VARIANCE_LOWER_PERCENTILE)
+    generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED, enforce_stationarity=False)
 
     # Filter out series that aren't between the two thresholds.
     filtered_generated_series = []
-    filtered_coefs = []
+    filtered_true_coefs = []
 
+    # Add noise and normalize
+    for series_idx in range(len(generated_series)):
+        if add_noise:
+            generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], noise_mu,
+                                                                            noise_sigma, SEED)
+        generated_series[series_idx] = normalize(generated_series[series_idx])
 
+    variances = [np.var(series) for series in generated_series]
+
+    # Compute upper and lower variance thresholds, which requires discarding inf. or undef. variance series
+    upper_var_threshold = np.percentile(variances, VARIANCE_UPPER_PERCENTILE)
+    lower_var_threshold = np.percentile(variances, VARIANCE_LOWER_PERCENTILE)
+
+    # Filter
     for series_idx, series in enumerate(generated_series):
         if np.isnan(np.var(series)) or np.isinf(np.var(series)):
             continue
 
         if lower_var_threshold <= np.var(series) and np.var(series) <= upper_var_threshold:
             filtered_generated_series += [series]
-            filtered_coefs += [coefs[series_idx]]
+            filtered_true_coefs += [true_coefs[series_idx]]
 
     generated_series = filtered_generated_series
-
-    coefs_and_biases = [[] for series in generated_series]
-
-    # Generate model with hierarchical and AR rules
-    hts_model_file = open(os.path.join(MODEL_PATH, "hierarchical_ar_" + str(p), "hts.psl"), "w")
-    hts_model_lines = "Series(S, +T) / |T| = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + "1.0: AggSeries(S, P) + 0.0 * PeriodLag1(P, P_Lag1) = AggSeries(S, P_Lag1) ^2\n\n"
-
-    for series_idx in range(len(generated_series)):
-        # Add extra noise to series, then normalize
-        generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], GAUSSIAN_NOISE_MU, GAUSSIAN_NOISE_SIGMA, SEED)
-        generated_series[series_idx] = normalize(generated_series[series_idx])
-
-        # Estimate AR coefficients/bias
-        estimated_ar_coefs, bias = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], 0, INITIAL_SEGMENT_SIZE, [1, 2])
-        coefs_and_biases[series_idx] = [estimated_ar_coefs, bias]
-        hts_model_lines += "1.0: Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = "
-        for idx, coef in enumerate(estimated_ar_coefs):
-            hts_model_lines += str(coef) + " * Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ")  + "
-
-        hts_model_lines += str(bias) + " ^2 \n"
-        """
-        hts_model_lines += "#Series " + str(series_idx) + "\n"
-
-        # Create AR rules
-        for idx, coef in enumerate(estimated_ar_coefs):
-            if coef > 0:
-                hts_model_lines += str(coef) + ": Series(S, T) - Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
-            else:
-                hts_model_lines += str(-1 * coef) + ": Series(S, T) + Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
-
-            hts_model_lines += "\n"
-
-        # Bias rule
-        if bias > 0:
-            hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 1.0\n"
-        else:
-            hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '" + str(series_idx) + "') = 0.0\n"
-
-        hts_model_lines += "\n"
-        """
-    hts_model_file.write(hts_model_lines)
+    coefs_and_biases = fit_ar_models(generated_series, 0, INITIAL_SEGMENT_SIZE, lags)
+    gen_hts_model(generated_series, coefs_and_biases, "hierarchical_test_model", lags, hierarchical_rule_weight=1.0)
 
     # Set up first experiment
     experiment_dir = os.path.join(DATA_PATH, "test_experiment", "eval")
@@ -297,4 +327,52 @@ def test_predicates():
     predicate_constructors.aggregate_series_predicate(generated_series, series_ids, 0, INITIAL_SEGMENT_SIZE - 1, period, os.path.join(time_step_test_dir, "AggregateSeries_obs.txt"))
     predicate_constructors.time_in_aggregate_window_predicate(0, INITIAL_SEGMENT_SIZE -  1, period, os.path.join(time_step_test_dir, "IsInWindow_obs.txt"))
 
+"""
+"""
+
+    #coefs_and_biases = [[] for series in generated_series]
+
+    for x in range(20, 30):
+        fig, (ax1, ax2) = plt.subplots(2, 1)
+
+        coefs_t, bias_t = estimate_AR_coefs.fit_AR_model(generated_series_ns[x], 0, len(generated_series_ns[x]) - 1, [1, 2, 30])
+
+        print(ar_forecast(generated_series_ns[x], coefs_t, bias_t, 30))
+        cmap = ListedColormap(['b', 'g'])
+        segments = np.concatenate([generated_series_ns[x][-120:], ar_forecast(generated_series_ns[x], coefs_t, bias_t, 30)])
+
+        lc = LineCollection(segments, cmap=cmap)
+
+        print(len(generated_series_ns[x]))
+        ax1.plot(generated_series_ns[x][-120:])
+
+
+        #agg_series = predicate_constructors.generate_aggregate_series(generated_series_ns[x], 0, len(generated_series_s[x]) - 1, WINDOW_SIZE)
+        ax2.add_collection(lc)
+
+        ax1.plot()
+        ax2.plot()
+        plt.show()
+
+    exit(1)
+"""
+"""
+hts_model_lines += "#Series " + str(series_idx) + "\n"
+
+# Create AR rules
+for idx, coef in enumerate(estimated_ar_coefs):
+    if coef > 0:
+        hts_model_lines += str(coef) + ": Series(S, T) - Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
+    else:
+        hts_model_lines += str(-1 * coef) + ": Series(S, T) + Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
+
+    hts_model_lines += "\n"
+
+# Bias rule
+if bias > 0:
+    hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 1.0\n"
+else:
+    hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '" + str(series_idx) + "') = 0.0\n"
+
+hts_model_lines += "\n"
 """
