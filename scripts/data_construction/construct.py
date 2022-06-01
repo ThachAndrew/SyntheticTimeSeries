@@ -118,10 +118,9 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
                                            os.path.join(initial_window_dir, "Lag1_obs.txt"))
     predicate_constructors.lag_n_predicate(2, 0, SERIES_LENGTH - 1,
                                            os.path.join(initial_window_dir, "Lag2_obs.txt"))
-    predicate_constructors.lag_n_predicate(3, 0, SERIES_LENGTH - 1,
-                                           os.path.join(initial_window_dir, "Lag3_obs.txt"))
-    #predicate_constructors.lag_n_predicate(30, 0, SERIES_LENGTH - 1,
-                                          # os.path.join(initial_window_dir, "Lag30_obs.txt"))
+    predicate_constructors.lag_n_predicate(30, 0, SERIES_LENGTH - 1,
+                                           os.path.join(initial_window_dir, "Lag30_obs.txt"))
+
     predicate_constructors.lag_n_predicate(1, 0, int(SERIES_LENGTH/WINDOW_SIZE),
                                            os.path.join(initial_window_dir, "PeriodLag1_obs.txt"))
     predicate_constructors.lag_n_predicate(2, 0, int(SERIES_LENGTH/WINDOW_SIZE),
@@ -135,20 +134,17 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
                                                               os.path.join(initial_window_dir,
                                                                            "IsInWindow_obs.txt"))
 
-    # AR Baseline; not used in model, but used for evaluation.
-    predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
-                                                 os.path.join(initial_window_dir,  "ARBaseline_obs.txt"))
 
-    #print(generated_series)
-    #exit(1)
     # First time step series values
-    predicate_constructors.series_predicate(generated_series, series_ids, 0, INITIAL_SEGMENT_SIZE - 1,
+    predicate_constructors.series_predicate(generated_series, series_ids, INITIAL_SEGMENT_SIZE - (WINDOW_SIZE + 1), INITIAL_SEGMENT_SIZE - 1,
                                             os.path.join(initial_window_dir, "Series_obs.txt"),
                                             include_values=True)
 
     agg_series = [predicate_constructors.generate_aggregate_series(series, 0, SERIES_LENGTH - 1, WINDOW_SIZE) for series in generated_series]
-    #print(agg_series[])
     predicate_constructors.oracle_series_predicate(agg_series, series_ids, 0, int(round((SERIES_LENGTH/WINDOW_SIZE))) - 1, 0.0, os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
+    # AR Baseline; not used in model, but used for evaluation.
+    predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1)] for series in agg_series], 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
+                                                 os.path.join(initial_window_dir,  "ARBaseline_obs.txt"), os.path.join(initial_window_dir,  "ARBaselineAdj_obs.txt"))
 
     #exit(1)
     predicate_constructors.agg_series_predicate(series_ids, 0, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE,
@@ -186,9 +182,9 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
                                                 include_values=True)
 
         # AR Baseline; not used in model, but used for evaluation.
-        predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, 0,
+        predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1 + window_idx)] for series in agg_series], 0,
                                                      start_time_step - 1, WINDOW_SIZE,
-                                                     os.path.join(forecast_window_dir, "ARBaseline_obs.txt"))
+                                                     os.path.join(forecast_window_dir, "ARBaseline_obs.txt"), os.path.join(forecast_window_dir, "ARBaselineAdj_obs.txt"))
 
         open(os.path.join(forecast_window_dir, "commands.txt"), "w").write(
             command_constructor.create_forecast_window_commands(generated_series, series_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx,
@@ -224,6 +220,42 @@ def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, hierarch
 
     hts_model_file.write(hts_model_lines)
 
+    hts_data_file = open(os.path.join(MODEL_PATH, str(model_name), "hts-eval.data"), "w")
+
+    hts_data_lines = "predicates:\n"
+    for lag in lags:
+        hts_data_lines += "   Lag" + str(lag) + "/2: closed\n"
+
+    hts_data_lines += """   Series/2: open
+   PeriodLag1/2: closed
+   PeriodLag2/2: closed
+   OracleSeries/2: closed
+   AggSeries/2: open
+   IsInWindow/2: closed
+   SeriesBlock/2: closed
+
+observations:\n"""
+
+    for lag in lags:
+        hts_data_lines += "   Lag" + str(lag) + ":   ../data/hts/eval/000/Lag" + str(lag) + "_obs.txt"
+
+    hts_data_lines += """
+       Series: ../data/hts/eval/000/Series_obs.txt
+   PeriodLag1: ../data/hts/eval/000/PeriodLag1_obs.txt
+   PeriodLag2: ../data/hts/eval/000/PeriodLag2_obs.txt
+   IsInWindow: ../data/hts/eval/000/IsInWindow_obs.txt
+   SeriesBlock: ../data/hts/eval/000/SeriesBlock_obs.txt
+   OracleSeries: ../data/hts/eval/000/OracleSeries_obs.txt
+
+targets:
+   Series: ../data/hts/eval/000/Series_target.txt
+
+truth:
+   Series: ../data/hts/eval/000/Series_truth.txt
+    """
+
+    hts_data_file.write(hts_data_lines)
+
     return coefs_and_biases
 
 # normalizes a series to a range of [0,1]
@@ -235,8 +267,8 @@ def normalize(series):
 
 def main():
     # Order of (S)AR model
-    P = 0
-    p = 3
+    P = 1
+    p = 1
     period = 30
 
     # Controls Gaussian noise to be added to every generated series
@@ -285,7 +317,7 @@ def main():
     gen_hts_model(generated_series, coefs_and_biases, "hierarchical_test_model", lags, hierarchical_rule_weight=5.0)
 
     # Set up first experiment
-    experiment_dir = os.path.join(DATA_PATH, "test_experiment_noise_ar3", "eval")
+    experiment_dir = os.path.join(DATA_PATH, "test_experiment_noise_seasonal", "eval")
     forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
     build_psl_data(generated_series, coefs_and_biases, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
 
