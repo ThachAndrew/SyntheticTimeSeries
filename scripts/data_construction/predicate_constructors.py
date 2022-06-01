@@ -1,5 +1,5 @@
 import numpy as np
-from ar_forecast import ar_forecast
+from ar_forecast import ar_forecast, top_down_adjust_ar_forecast
 
 def lag_n_predicate(n, start, end, out_path):
     out_file_handle = open(out_path, "w")
@@ -26,20 +26,26 @@ def series_predicate(series_list, series_ids, start_index, end_index, out_path, 
 
     out_file_handle.write(out_file_lines)
 
-def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, start_index, end_index, n, out_path):
+def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_series_list, start_index, end_index, n, out_path, adj_out_path):
     out_file_handle = open(out_path, "w")
+    adj_out_file_handle = open(adj_out_path, "w")
     out_file_lines = ""
+    adj_out_file_lines = ""
 
     for series_idx, series in enumerate(series_list):
         series = series[start_index:end_index+1]
 
         coefs, bias = coefs_and_biases[series_idx]
         forecast = np.clip(ar_forecast(series, coefs, bias, n), 0, 1)
+        adj_forecast = top_down_adjust_ar_forecast(forecast, oracle_series_list[series_idx])
 
         for time_step_idx in range(n):
             out_file_lines += str(series_ids[series_idx]) + "\t" + str(end_index + time_step_idx + 1) + "\t" + str(round(forecast[time_step_idx], 6)) + "\n"
+            adj_out_file_lines += str(series_ids[series_idx]) + "\t" + str(end_index + time_step_idx + 1) + "\t" + str(
+                round(adj_forecast[time_step_idx], 6)) + "\n"
 
     out_file_handle.write(out_file_lines)
+    adj_out_file_handle.write(adj_out_file_lines)
 
 def series_block_predicate(series_ids, out_path):
     out_file_handle = open(out_path, "w")
