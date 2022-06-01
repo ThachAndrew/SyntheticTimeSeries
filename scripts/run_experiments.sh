@@ -7,10 +7,10 @@ readonly BASE_DIR="${THIS_DIR}/.."
 readonly MODELS_DIR="${BASE_DIR}/timeseries_models"
 readonly RESULTS_DIR="${BASE_DIR}/results"
 
-readonly TIMESERIES_MODELS='hierarchical_ar_2'
+readonly TIMESERIES_MODELS='hierarchical_test_model'
 
 readonly EXPERIMENTS='Online'
-readonly DATASETS='test_experiment'
+readonly DATASETS='test_experiment_noise_ar3'
 
 declare -A MODEL_OPTIONS
 MODEL_OPTIONS[test_experiment]='-D sgd.learningrate=1.0 -D sgd.maxiterations=2000'

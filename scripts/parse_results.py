@@ -21,11 +21,13 @@ def means_and_sig_test(results_df, metric, mean=True):
     ar_window_vals = []
 
     if mean:
+        skipped = []
         for name, group in results_df[results_df["Method"] == "PSL"].groupby(by=["Forecast_Window"]):
             psl_window_vals += [np.mean(group[metric].values)]
         for name, group in results_df[results_df["Method"] == "AR"].groupby(by=["Forecast_Window"]):
             ar_window_vals += [np.mean(group[metric].values)]
     else:
+        skipped = []
         for name, group in results_df[results_df["Method"] == "PSL"].groupby(by=["Forecast_Window"]):
             psl_window_vals += [np.median(group[metric].values)]
         for name, group in results_df[results_df["Method"] == "AR"].groupby(by=["Forecast_Window"]):
@@ -36,6 +38,7 @@ def means_and_sig_test(results_df, metric, mean=True):
 def main():
     truth_dir = sys.argv[1]
     res_dir = sys.argv[2]
+    out_file = sys.argv[3]
 
     abs_error_psl = 0
     abs_error_ar = 0
@@ -68,7 +71,7 @@ def main():
             if series_id not in truth_dict:
                 truth_dict[series_id] = dict()
 
-            truth_dict[series_id][timestep] = float(val)
+            truth_dict[series_id][timestep] = round(float(val), 5)
 
         for line in result_lines:
             tokens = line.split("\t")
@@ -79,7 +82,7 @@ def main():
             if series_id not in result_dict:
                 result_dict[series_id] = dict()
 
-            result_dict[series_id][timestep] = float(val)
+            result_dict[series_id][timestep] = round(float(val), 5)
 
         for line in ar_baseline_lines:
             tokens = line.split("\t")
@@ -90,7 +93,7 @@ def main():
             if series_id not in ar_baseline_dict:
                 ar_baseline_dict[series_id] = dict()
 
-            ar_baseline_dict[series_id][timestep] = float(val)
+            ar_baseline_dict[series_id][timestep] = round(float(val), 5)
 
         for series in truth_dict.keys():
             abs_errors_psl = []
@@ -116,6 +119,9 @@ def main():
 
                 abs_error_count += 1
 
+            if np.var(predicted_values_ar) == 0 or np.var(predicted_values_psl) == 0:
+                continue
+
             corr_psl = np.corrcoef(truth_values, predicted_values_psl)[0][1]
             corr_ar = np.corrcoef(truth_values, predicted_values_ar)[0][1]
 
@@ -136,14 +142,17 @@ def main():
         metric_cols += [metric]
         metric_cols += [metric + "_std"]
 
-    out_file_handle = open(OUT_FILE_NAME, "w")
+    out_file_handle = open(out_file, "w")
     out_file_lines = "Method\t" + "\t".join(metric_cols) + "\n"
 
     psl_metric_line = "PSL\t"
     ar_metric_line = "AR\t"
 
+    pvals = dict()
+
     for metric in METRICS:
         mean_psl, std_psl, mean_ar, std_ar, pvalue = means_and_sig_test(results_df, metric)
+        pvals[metric] = pvalue
         psl_metric_line += str(mean_psl) + "\t" + str(std_psl) + "\t"
         ar_metric_line += str(mean_ar) + "\t" + str(std_ar) + "\t"
 
@@ -153,5 +162,13 @@ def main():
     out_file_lines += psl_metric_line + ar_metric_line
 
     out_file_handle.write(out_file_lines)
+
+    pvals_out_file_handle = open(out_file + "_pvals.txt", "w")
+    pvals_lines = ""
+    for metric in pvals:
+        pvals_lines += metric + "\t" + str(pvals[metric]) + "\n"
+
+    pvals_out_file_handle.write(pvals_lines)
+
 if __name__ == '__main__':
     main()

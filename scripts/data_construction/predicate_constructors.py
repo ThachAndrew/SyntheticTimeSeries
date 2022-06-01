@@ -34,10 +34,10 @@ def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, start_index
         series = series[start_index:end_index+1]
 
         coefs, bias = coefs_and_biases[series_idx]
-        forecast = ar_forecast(series, coefs, bias, n)
+        forecast = np.clip(ar_forecast(series, coefs, bias, n), 0, 1)
 
         for time_step_idx in range(n):
-            out_file_lines += str(series_ids[series_idx]) + "\t" + str(end_index + time_step_idx + 1) + "\t" + str(forecast[time_step_idx]) + "\n"
+            out_file_lines += str(series_ids[series_idx]) + "\t" + str(end_index + time_step_idx + 1) + "\t" + str(round(forecast[time_step_idx], 6)) + "\n"
 
     out_file_handle.write(out_file_lines)
 

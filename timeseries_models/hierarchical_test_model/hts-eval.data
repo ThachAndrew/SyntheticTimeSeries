@@ -1,0 +1,26 @@
+predicates:
+   Lag1/2: closed
+   Lag2/2: closed
+   Series/2: open
+   PeriodLag1/2: closed
+   PeriodLag2/2: closed
+   OracleSeries/2: closed
+   AggSeries/2: open
+   IsInWindow/2: closed
+   SeriesBlock/2: closed
+
+observations:
+   Lag1: ../data/hts/eval/000/Lag1_obs.txt
+   Lag2: ../data/hts/eval/000/Lag2_obs.txt
+   Series: ../data/hts/eval/000/Series_obs.txt
+   PeriodLag1: ../data/hts/eval/000/PeriodLag1_obs.txt
+   PeriodLag2: ../data/hts/eval/000/PeriodLag2_obs.txt
+   IsInWindow: ../data/hts/eval/000/IsInWindow_obs.txt
+   SeriesBlock: ../data/hts/eval/000/SeriesBlock_obs.txt
+   OracleSeries: ../data/hts/eval/000/OracleSeries_obs.txt
+
+targets:
+   Series: ../data/hts/eval/000/Series_target.txt
+
+truth:
+   Series: ../data/hts/eval/000/Series_truth.txt

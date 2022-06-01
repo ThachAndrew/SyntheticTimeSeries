@@ -15,7 +15,7 @@ from statsmodels.graphics.tsaplots import plot_acf
 
 import math
 
-NUM_SERIES_GENERATED = 100
+NUM_SERIES_GENERATED = 500
 VARIANCE_LOWER_PERCENTILE = 20
 VARIANCE_UPPER_PERCENTILE = 80
 NUM_SERIES = int(np.rint(NUM_SERIES_GENERATED * (VARIANCE_UPPER_PERCENTILE - VARIANCE_LOWER_PERCENTILE)))
@@ -118,6 +118,10 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
                                            os.path.join(initial_window_dir, "Lag1_obs.txt"))
     predicate_constructors.lag_n_predicate(2, 0, SERIES_LENGTH - 1,
                                            os.path.join(initial_window_dir, "Lag2_obs.txt"))
+    predicate_constructors.lag_n_predicate(3, 0, SERIES_LENGTH - 1,
+                                           os.path.join(initial_window_dir, "Lag3_obs.txt"))
+    #predicate_constructors.lag_n_predicate(30, 0, SERIES_LENGTH - 1,
+                                          # os.path.join(initial_window_dir, "Lag30_obs.txt"))
     predicate_constructors.lag_n_predicate(1, 0, int(SERIES_LENGTH/WINDOW_SIZE),
                                            os.path.join(initial_window_dir, "PeriodLag1_obs.txt"))
     predicate_constructors.lag_n_predicate(2, 0, int(SERIES_LENGTH/WINDOW_SIZE),
@@ -144,7 +148,7 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
 
     agg_series = [predicate_constructors.generate_aggregate_series(series, 0, SERIES_LENGTH - 1, WINDOW_SIZE) for series in generated_series]
     #print(agg_series[])
-    predicate_constructors.oracle_series_predicate(agg_series, series_ids, 0, int(round((SERIES_LENGTH/WINDOW_SIZE))) - 1, 0.01, os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
+    predicate_constructors.oracle_series_predicate(agg_series, series_ids, 0, int(round((SERIES_LENGTH/WINDOW_SIZE))) - 1, 0.0, os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
 
     #exit(1)
     predicate_constructors.agg_series_predicate(series_ids, 0, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE,
@@ -201,9 +205,12 @@ def fit_ar_models(generated_series, start_idx, end_idx, lags):
     return coefs_and_biases
 
 def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, hierarchical_rule_weight=1.0):
+    if not os.path.exists(os.path.join(MODEL_PATH, str(model_name))):
+        os.makedirs(os.path.join(MODEL_PATH, str(model_name)))
+
     # Generate model with hierarchical and AR rules
-    hts_model_file = open(os.path.join(MODEL_PATH, str(model_name) + ".psl"), "w")
-    hts_model_lines = "Series(S, +T) / |T| = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + str(hierarchical_rule_weight) + ": AggSeries(S, P) = OracleSeries(S, P_Lag1) ^2\n\n"
+    hts_model_file = open(os.path.join(MODEL_PATH, str(model_name), "hts.psl"), "w")
+    hts_model_lines = "Series(S, +T) / |T| = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + str(hierarchical_rule_weight) + ": AggSeries(S, P) = OracleSeries(S, P) ^2\n\n"
 
     for series_idx in range(len(generated_series)):
         estimated_ar_coefs, bias = coefs_and_biases[series_idx]
@@ -213,7 +220,7 @@ def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, hierarch
         for idx, coef in enumerate(estimated_ar_coefs):
             hts_model_lines += str(coef) + " * Series(S, T_Lag" + str(lags[idx]) + ") + 0.0 * Lag" + str(lags[idx]) + "(T, T_Lag" + str(lags[idx]) + ")  + "
 
-        hts_model_lines += str(bias) + " ^2 \n"
+        hts_model_lines += str(bias) + "\n"
 
     hts_model_file.write(hts_model_lines)
 
@@ -229,13 +236,13 @@ def normalize(series):
 def main():
     # Order of (S)AR model
     P = 0
-    p = 2
+    p = 3
     period = 30
 
     # Controls Gaussian noise to be added to every generated series
     add_noise = True
     noise_mu = 0
-    noise_sigma = 1
+    noise_sigma = 2
 
     # Lags present in the (S)AR model, computed from its order.
     lags = np.zeros(p + P)
@@ -275,10 +282,10 @@ def main():
 
     generated_series = filtered_generated_series
     coefs_and_biases = fit_ar_models(generated_series, 0, INITIAL_SEGMENT_SIZE, lags)
-    gen_hts_model(generated_series, coefs_and_biases, "hierarchical_test_model", lags, hierarchical_rule_weight=1.0)
+    gen_hts_model(generated_series, coefs_and_biases, "hierarchical_test_model", lags, hierarchical_rule_weight=5.0)
 
     # Set up first experiment
-    experiment_dir = os.path.join(DATA_PATH, "test_experiment", "eval")
+    experiment_dir = os.path.join(DATA_PATH, "test_experiment_noise_ar3", "eval")
     forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
     build_psl_data(generated_series, coefs_and_biases, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
 
