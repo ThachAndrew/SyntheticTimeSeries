@@ -12,6 +12,8 @@ import numpy as np
 import os
 from statsmodels.tsa.stattools import kpss, adfuller, acf, pacf
 from statsmodels.graphics.tsaplots import plot_acf
+from statsmodels.regression.linear_model import yule_walker
+
 
 import math
 
@@ -19,7 +21,7 @@ NUM_SERIES_GENERATED = 500
 VARIANCE_LOWER_PERCENTILE = 20
 VARIANCE_UPPER_PERCENTILE = 80
 NUM_SERIES = int(np.rint(NUM_SERIES_GENERATED * (VARIANCE_UPPER_PERCENTILE - VARIANCE_LOWER_PERCENTILE)))
-WINDOW_SIZE = 30
+WINDOW_SIZE = 10
 
 INITIAL_SEGMENT_SIZE = 1000
 INITIAL_SEGMENT_SIZE += (WINDOW_SIZE - (INITIAL_SEGMENT_SIZE % WINDOW_SIZE))
@@ -27,7 +29,7 @@ NUM_FORECAST_WINDOWS = 30
 
 SERIES_LENGTH = INITIAL_SEGMENT_SIZE + (NUM_FORECAST_WINDOWS) * WINDOW_SIZE
 
-MIN_VARIANCE = 10 ** -2
+MIN_VARIANCE = 10 ** -1
 
 SEED = 55555
 REGEN_SEED_MAX = 10 ** 8
@@ -94,13 +96,13 @@ def generate_multiple_series(num_series, length, p, P, period, seed, enforce_sta
                     char_polynomial = np.append(1, all_coefs)[::-1]
 
             coefs[x] = all_coefs
-            series[x] = np.array([generate_ar(length, all_coefs)])
+            series[x] = np.array([generate_ar(length, all_coefs, sigma=2)])
 
             var = np.var(series[x])
 
     return series, coefs
 
-def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_dir, forecast_window_dirs):
+def build_psl_data(generated_series, coefs_and_biases, lags, num_windows, experiment_dir, forecast_window_dirs):
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
 
@@ -114,17 +116,10 @@ def build_psl_data(generated_series, coefs_and_biases, num_windows, experiment_d
         os.makedirs(initial_window_dir)
 
     # Time step and window lags
-    predicate_constructors.lag_n_predicate(1, 0, SERIES_LENGTH - 1,
-                                           os.path.join(initial_window_dir, "Lag1_obs.txt"))
-    predicate_constructors.lag_n_predicate(2, 0, SERIES_LENGTH - 1,
-                                           os.path.join(initial_window_dir, "Lag2_obs.txt"))
-    predicate_constructors.lag_n_predicate(30, 0, SERIES_LENGTH - 1,
-                                           os.path.join(initial_window_dir, "Lag30_obs.txt"))
 
-    predicate_constructors.lag_n_predicate(1, 0, int(SERIES_LENGTH/WINDOW_SIZE),
-                                           os.path.join(initial_window_dir, "PeriodLag1_obs.txt"))
-    predicate_constructors.lag_n_predicate(2, 0, int(SERIES_LENGTH/WINDOW_SIZE),
-                                           os.path.join(initial_window_dir, "PeriodLag2_obs.txt"))
+    for lag in lags:
+        predicate_constructors.lag_n_predicate(lag, 0, SERIES_LENGTH - 1,
+                                               os.path.join(initial_window_dir, "Lag" + str(lag) + "_obs.txt"))
 
     # Series block for specialization
     predicate_constructors.series_block_predicate(series_ids, os.path.join(initial_window_dir, "SeriesBlock_obs.txt"))
@@ -237,10 +232,9 @@ def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, hierarch
 observations:\n"""
 
     for lag in lags:
-        hts_data_lines += "   Lag" + str(lag) + ":   ../data/hts/eval/000/Lag" + str(lag) + "_obs.txt"
+        hts_data_lines += "   Lag" + str(lag) + ":   ../data/hts/eval/000/Lag" + str(lag) + "_obs.txt \n"
 
-    hts_data_lines += """
-       Series: ../data/hts/eval/000/Series_obs.txt
+    hts_data_lines += """   Series: ../data/hts/eval/000/Series_obs.txt
    PeriodLag1: ../data/hts/eval/000/PeriodLag1_obs.txt
    PeriodLag2: ../data/hts/eval/000/PeriodLag2_obs.txt
    IsInWindow: ../data/hts/eval/000/IsInWindow_obs.txt
@@ -265,10 +259,12 @@ def normalize(series):
 
     return [(float(i)-min_element)/(max_element-min_element) for i in series]
 
+#def set_up_experiment(num_series, series_length, forecast_window_width, order, ar_process_noise_sigma, added_noise_sigma, oracle_noise_sigma, experiment_dir):
+
 def main():
     # Order of (S)AR model
-    P = 1
-    p = 1
+    P = 0
+    p = 2
     period = 30
 
     # Controls Gaussian noise to be added to every generated series
@@ -319,99 +315,7 @@ def main():
     # Set up first experiment
     experiment_dir = os.path.join(DATA_PATH, "test_experiment_noise_seasonal", "eval")
     forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
-    build_psl_data(generated_series, coefs_and_biases, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
+    build_psl_data(generated_series, coefs_and_biases, lags, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
 
 if __name__ == '__main__':
     main()
-
-
-"""
-
-    #for idx, series in enumerate(generated_series[:-1]):
-    #    print(coefs[idx])
-    #    estimate_AR_coefs.fit_AR_model(series, 0, 300, [1, 2])
-    #    estimate_AR_coefs.fit_AR_model(estimate_AR_coefs.generate_aggregate_series(series, 0, 299, 10), 0, 300, [1,2])
-    #    print("--")
-
-    #print(generated_series[-1])
-    #print(estimate_AR_coefs.generate_aggregate_series(generated_series[-1], 0, 999, 10))
-
-def test_predicates():
-    P = 0
-    p = 2
-    period = 10
-
-    np.random.seed(SEED)
-
-    generated_series, coefs = generate_multiple_series(NUM_SERIES, SERIES_LENGTH, p, P, period, seed=SEED)
-
-    test_series = []
-    for x in range(int(SERIES_LENGTH / 2)):
-        test_series += [5, 10]
-
-    generated_series = np.append(generated_series, [test_series], axis=0)
-
-    series_ids = np.arange(len(generated_series))
-
-    if not os.path.exists(DATA_PATH):
-        os.makedirs(DATA_PATH)
-
-    time_step_test_dir = os.path.join(DATA_PATH, "001")
-
-    if not os.path.exists(time_step_test_dir):
-        os.makedirs(time_step_test_dir)
-
-    predicate_constructors.lag_n_predicate(1, 1, INITIAL_SEGMENT_SIZE, os.path.join(time_step_test_dir, "Lag1_obs.txt"))
-    predicate_constructors.series_predicate(generated_series, series_ids, 0, INITIAL_SEGMENT_SIZE -  1, os.path.join(time_step_test_dir, "Series_obs.txt"), include_values=True)
-    predicate_constructors.aggregate_series_predicate(generated_series, series_ids, 0, INITIAL_SEGMENT_SIZE - 1, period, os.path.join(time_step_test_dir, "AggregateSeries_obs.txt"))
-    predicate_constructors.time_in_aggregate_window_predicate(0, INITIAL_SEGMENT_SIZE -  1, period, os.path.join(time_step_test_dir, "IsInWindow_obs.txt"))
-
-"""
-"""
-
-    #coefs_and_biases = [[] for series in generated_series]
-
-    for x in range(20, 30):
-        fig, (ax1, ax2) = plt.subplots(2, 1)
-
-        coefs_t, bias_t = estimate_AR_coefs.fit_AR_model(generated_series_ns[x], 0, len(generated_series_ns[x]) - 1, [1, 2, 30])
-
-        print(ar_forecast(generated_series_ns[x], coefs_t, bias_t, 30))
-        cmap = ListedColormap(['b', 'g'])
-        segments = np.concatenate([generated_series_ns[x][-120:], ar_forecast(generated_series_ns[x], coefs_t, bias_t, 30)])
-
-        lc = LineCollection(segments, cmap=cmap)
-
-        print(len(generated_series_ns[x]))
-        ax1.plot(generated_series_ns[x][-120:])
-
-
-        #agg_series = predicate_constructors.generate_aggregate_series(generated_series_ns[x], 0, len(generated_series_s[x]) - 1, WINDOW_SIZE)
-        ax2.add_collection(lc)
-
-        ax1.plot()
-        ax2.plot()
-        plt.show()
-
-    exit(1)
-"""
-"""
-hts_model_lines += "#Series " + str(series_idx) + "\n"
-
-# Create AR rules
-for idx, coef in enumerate(estimated_ar_coefs):
-    if coef > 0:
-        hts_model_lines += str(coef) + ": Series(S, T) - Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
-    else:
-        hts_model_lines += str(-1 * coef) + ": Series(S, T) + Series(S, T_Lag" + str(idx + 1) + ") + 0.0 * Lag" + str(idx + 1) + "(T, T_Lag" + str(idx + 1) + ") + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 0.0 ^2"
-
-    hts_model_lines += "\n"
-
-# Bias rule
-if bias > 0:
-    hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '"+ str(series_idx) + "') = 1.0\n"
-else:
-    hts_model_lines += str(bias / 2) + ": Series(S, T) + 0.0 * SeriesBlock(S, '" + str(series_idx) + "') = 0.0\n"
-
-hts_model_lines += "\n"
-"""

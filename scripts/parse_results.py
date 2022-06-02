@@ -47,7 +47,8 @@ def main():
 
     results_df = pd.DataFrame(columns=["Series_ID", "Forecast_Window", "Method", "MAE", "MedAE", "Corr", "R2"])
 
-    for fold_dir in os.listdir(res_dir):
+    for i in range(19):
+        fold_dir = str(i).zfill(3)
         if not os.path.isdir(os.path.join(res_dir, fold_dir)):
             continue
 
