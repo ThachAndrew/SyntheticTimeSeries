@@ -14,14 +14,16 @@ from statsmodels.tsa.stattools import kpss, adfuller, acf, pacf
 from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.regression.linear_model import yule_walker
 
-
 import math
+
+DATA_PATH = "data"
+MODEL_PATH = "timeseries_models"
+EXPERIMENT_NAME = "test_experiment_noise_seasonal"
 
 NUM_SERIES_GENERATED = 500
 VARIANCE_LOWER_PERCENTILE = 20
 VARIANCE_UPPER_PERCENTILE = 80
-NUM_SERIES = int(np.rint(NUM_SERIES_GENERATED * (VARIANCE_UPPER_PERCENTILE - VARIANCE_LOWER_PERCENTILE)))
-WINDOW_SIZE = 10
+WINDOW_SIZE = 30
 
 INITIAL_SEGMENT_SIZE = 1000
 INITIAL_SEGMENT_SIZE += (WINDOW_SIZE - (INITIAL_SEGMENT_SIZE % WINDOW_SIZE))
@@ -34,11 +36,7 @@ MIN_VARIANCE = 10 ** -1
 SEED = 55555
 REGEN_SEED_MAX = 10 ** 8
 
-GAUSSIAN_NOISE_MU = 0
-GAUSSIAN_NOISE_SIGMA = 1
-
-DATA_PATH = "data"
-MODEL_PATH = "timeseries_models"
+BASE_SERIES_NOISE_SIGMAS = [float(1/3), float(2/3), 1, float(4/3)]
 
 def generate_wn(n, sigma=1):
     return np.random.normal(0, sigma, size=n)
@@ -102,7 +100,7 @@ def generate_multiple_series(num_series, length, p, P, period, seed, enforce_sta
 
     return series, coefs
 
-def build_psl_data(generated_series, coefs_and_biases, lags, num_windows, experiment_dir, forecast_window_dirs):
+def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, lags, num_windows, experiment_dir, forecast_window_dirs):
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
 
@@ -135,8 +133,16 @@ def build_psl_data(generated_series, coefs_and_biases, lags, num_windows, experi
                                             os.path.join(initial_window_dir, "Series_obs.txt"),
                                             include_values=True)
 
+    cluster_series_map = predicate_constructors.series_cluster_predicate(series_ids, 5, os.path.join(initial_window_dir, "SeriesCluster_obs.txt"))
+    predicate_constructors.cluster_oracle_predicate(generated_series, cluster_series_map, cluster_oracle_noise_sigma, 0, SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterOracle_obs.txt"))
+
     agg_series = [predicate_constructors.generate_aggregate_series(series, 0, SERIES_LENGTH - 1, WINDOW_SIZE) for series in generated_series]
-    predicate_constructors.oracle_series_predicate(agg_series, series_ids, 0, int(round((SERIES_LENGTH/WINDOW_SIZE))) - 1, 0.0, os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
+
+    predicate_constructors.oracle_series_predicate(agg_series, series_ids, 0, int(round(SERIES_LENGTH/WINDOW_SIZE)) - 1, 0.0,
+                                                   os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
+
+    predicate_constructors.naive_prediction_predicate(agg_series, series_ids, 0, SERIES_LENGTH - 1, WINDOW_SIZE, os.path.join(initial_window_dir, "NaiveBaseline_obs.txt"))
+
     # AR Baseline; not used in model, but used for evaluation.
     predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1)] for series in agg_series], 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
                                                  os.path.join(initial_window_dir,  "ARBaseline_obs.txt"), os.path.join(initial_window_dir,  "ARBaselineAdj_obs.txt"))
@@ -269,7 +275,6 @@ def main():
 
     # Controls Gaussian noise to be added to every generated series
     add_noise = True
-    noise_mu = 0
     noise_sigma = 2
 
     # Lags present in the (S)AR model, computed from its order.
@@ -280,7 +285,7 @@ def main():
 
     # Generate random AR data
     np.random.seed(SEED)
-    generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED, enforce_stationarity=False)
+    generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED)
 
     # Filter out series that aren't between the two thresholds.
     filtered_generated_series = []
@@ -289,7 +294,7 @@ def main():
     # Add noise and normalize
     for series_idx in range(len(generated_series)):
         if add_noise:
-            generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], noise_mu,
+            generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], 0,
                                                                             noise_sigma, SEED)
         generated_series[series_idx] = normalize(generated_series[series_idx])
 
@@ -313,9 +318,9 @@ def main():
     gen_hts_model(generated_series, coefs_and_biases, "hierarchical_test_model", lags, hierarchical_rule_weight=5.0)
 
     # Set up first experiment
-    experiment_dir = os.path.join(DATA_PATH, "test_experiment_noise_seasonal", "eval")
+    experiment_dir = os.path.join(DATA_PATH, EXPERIMENT_NAME, "eval")
     forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
-    build_psl_data(generated_series, coefs_and_biases, lags, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
+    build_psl_data(generated_series, coefs_and_biases, 0.0, lags, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
 
 if __name__ == '__main__':
     main()

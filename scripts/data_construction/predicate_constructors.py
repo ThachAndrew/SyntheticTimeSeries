@@ -13,6 +13,7 @@ def lag_n_predicate(n, start, end, out_path):
 def series_predicate(series_list, series_ids, start_index, end_index, out_path, include_values=True):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
+
     for series_idx, series in enumerate(series_list):
         for time_step_idx in range(end_index - start_index + 1):
             time_step = time_step_idx + start_index
@@ -23,6 +24,36 @@ def series_predicate(series_list, series_ids, start_index, end_index, out_path, 
                 out_file_lines += "\t" + str(series[time_step_idx])
 
             out_file_lines += "\n"
+
+    out_file_handle.write(out_file_lines)
+
+def series_cluster_predicate(series_ids, cluster_size, out_path):
+    out_file_handle = open(out_path, "w")
+    out_file_lines = ""
+
+    cluster_series_map = dict()
+
+    for idx, series_id in enumerate(series_ids):
+        cluster = int(idx / cluster_size)
+        out_file_lines += str(series_id) + "\t" + str(cluster) + "\n"
+        if cluster not in cluster_series_map:
+            cluster_series_map[cluster] = []
+        cluster_series_map[cluster] += [series_id]
+
+    out_file_handle.write(out_file_lines)
+
+    return cluster_series_map
+
+def cluster_oracle_predicate(series_list, cluster_series_map, noise_sigma, start_index, end_index, out_path):
+    out_file_handle = open(out_path, "w")
+    out_file_lines = ""
+
+    for cluster_id in cluster_series_map:
+        agg_series = np.sum([series_list[idx][start_index:end_index+1] for idx in cluster_series_map[cluster_id]], axis=0)
+        agg_series = agg_series + np.random.normal(scale=noise_sigma, size=len(agg_series))
+
+        for t in range(len(agg_series)):
+            out_file_lines += str(cluster_id) + "\t" + str(t + start_index) + "\t" + str(agg_series[t] / len(cluster_series_map[cluster_id])) + "\n"
 
     out_file_handle.write(out_file_lines)
 
@@ -72,6 +103,20 @@ def agg_series_predicate(series_ids, start_index, end_index, window_size, out_pa
 
     out_file_handle.write(out_file_lines)
 
+def naive_prediction_predicate(agg_series_list, series_ids, start_index, end_index, window_size, out_path):
+    out_file_handle = open(out_path, "w")
+    out_file_lines = ""
+
+    if (end_index - start_index + 1) % window_size != 0:
+        print("Series length not divisible by window length, quitting.")
+        exit(1)
+
+    for series_idx, series in enumerate(agg_series_list):
+        for window_idx, agg_value in enumerate(series):
+            for timestep in range((window_idx * window_size), ((window_idx + 1) * window_size)):
+                out_file_lines += str(series_ids[series_idx]) + "\t" + str(timestep) + "\t" + str(agg_value) + "\n"
+
+    out_file_handle.write(out_file_lines)
 
 # The end index is one after the last time step we're including in the aggregation windows
 def time_in_aggregate_window_predicate(start_index, end_index, window_size, out_path):
