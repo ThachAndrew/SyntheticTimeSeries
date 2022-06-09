@@ -44,6 +44,16 @@ def series_cluster_predicate(series_ids, cluster_size, out_path):
 
     return cluster_series_map
 
+def cluster_mean_predicate(cluster_series_map, start_timestep, end_timestep, out_path):
+    out_file_handle = open(out_path, "w")
+    out_file_lines = ""
+
+    for cluster in cluster_series_map:
+        for timestep in range(start_timestep, end_timestep + 1):
+            out_file_lines += str(cluster) + "\t" + str(timestep) + "\n"
+
+    out_file_handle.write(out_file_lines)
+
 def cluster_oracle_predicate(series_list, cluster_series_map, noise_sigma, start_index, end_index, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -103,18 +113,14 @@ def agg_series_predicate(series_ids, start_index, end_index, window_size, out_pa
 
     out_file_handle.write(out_file_lines)
 
-def naive_prediction_predicate(agg_series_list, series_ids, start_index, end_index, window_size, out_path):
+def naive_prediction_predicate(agg_series_list, series_ids, window_start_idx, window_end_idx, window_size, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
 
-    if (end_index - start_index + 1) % window_size != 0:
-        print("Series length not divisible by window length, quitting.")
-        exit(1)
-
     for series_idx, series in enumerate(agg_series_list):
-        for window_idx, agg_value in enumerate(series):
-            for timestep in range((window_idx * window_size), ((window_idx + 1) * window_size)):
-                out_file_lines += str(series_ids[series_idx]) + "\t" + str(timestep) + "\t" + str(agg_value) + "\n"
+        for window_idx in range(window_start_idx, window_end_idx):
+            for ts_idx in range(window_size):
+                out_file_lines += str(series_ids[series_idx]) + "\t" + str(window_idx * window_size + ts_idx) + "\t" + str(series[window_idx]) + "\n"
 
     out_file_handle.write(out_file_lines)
 
@@ -164,7 +170,8 @@ def oracle_series_predicate(series_list, series_ids, start_index, end_index, noi
 
     for series in series_list:
         for x in range(len(series)):
-            series[x] += np.random.normal(scale=noise_sigma)
+            std = np.std(series[x])
+            series[x] += np.random.normal(scale=noise_sigma * std)
 
             # Might be necessary to clip depending on the amount of noise added.
             series[x] = np.clip(series[x], 0, 1)
