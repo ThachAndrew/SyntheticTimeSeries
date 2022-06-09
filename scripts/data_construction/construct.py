@@ -34,10 +34,9 @@ SERIES_LENGTH = INITIAL_SEGMENT_SIZE + (NUM_FORECAST_WINDOWS) * WINDOW_SIZE
 MIN_VARIANCE = 10 ** -1
 
 SEED = 55555
-REGEN_SEED_MAX = 10 ** 8
 
-BASE_SERIES_NOISE_SIGMAS = [float(1/3), float(2/3)]
-ORACLE_SERIES_NOISE_SIGMAS = [0.25, 0.5]
+BASE_SERIES_NOISE_SIGMAS = [0.25, 0.5, 0.75, 1.0, 1.25]
+ORACLE_SERIES_NOISE_SIGMAS = [0.25, 0.5, 0.75, 1.0, 1.25]
 
 def generate_wn(n, sigma=1):
     return np.random.normal(0, sigma, size=n)
@@ -100,7 +99,7 @@ def generate_multiple_series(num_series, length, p, P, period, seed, enforce_non
 
     return series, coefs
 
-def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, num_windows, experiment_dir, forecast_window_dirs):
+def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, num_windows, experiment_dir, forecast_window_dirs, cluster_hierarchy=False):
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
 
@@ -149,6 +148,9 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
     # AR Baseline; not used in model, but used for evaluation.
     predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1)] for series in agg_series], 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
                                                  os.path.join(initial_window_dir,  "ARBaseline_obs.txt"), os.path.join(initial_window_dir,  "ARBaselineAdj_obs.txt"))
+
+    if cluster_hierarchy:
+        predicate_constructors.fp_ar_baseline_predicate()
 
     #exit(1)
     predicate_constructors.agg_series_predicate(series_ids, 0, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE,
@@ -330,6 +332,7 @@ def main():
         forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
         build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
 
+    # Experiment 2
     for oracle_noise_sigma in ORACLE_SERIES_NOISE_SIGMAS:
         # Order of (S)AR model
         P = 0

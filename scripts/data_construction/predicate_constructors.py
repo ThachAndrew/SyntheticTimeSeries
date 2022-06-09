@@ -60,7 +60,7 @@ def cluster_oracle_predicate(series_list, cluster_series_map, noise_sigma, start
 
     for cluster_id in cluster_series_map:
         agg_series = np.sum([series_list[idx][start_index:end_index+1] for idx in cluster_series_map[cluster_id]], axis=0)
-        agg_series = agg_series + np.random.normal(scale=noise_sigma, size=len(agg_series))
+        agg_series = agg_series + np.random.normal(scale=noise_sigma * np.std(agg_series), size=len(agg_series))
 
         for t in range(len(agg_series)):
             out_file_lines += str(cluster_id) + "\t" + str(t + start_index) + "\t" + str(agg_series[t] / len(cluster_series_map[cluster_id])) + "\n"
@@ -87,6 +87,11 @@ def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_seri
 
     out_file_handle.write(out_file_lines)
     adj_out_file_handle.write(adj_out_file_lines)
+
+def fp_ar_baseline_predicate(series_list, coefs_and_biases, series_ids, cluster_series_map, agg_series_list)
+
+# fp_adjust_ar_forecast(series, agg_series)
+
 
 def series_block_predicate(series_ids, out_path):
     out_file_handle = open(out_path, "w")
