@@ -1,6 +1,7 @@
 import numpy as np
-from ar_forecast import ar_forecast, top_down_adjust_ar_forecast
+from ar_forecast import ar_forecast, top_down_adjust_ar_forecast, fp_adjust_ar_forecast
 
+# Timestep lag predicate, gives the n-lagged timestep pairs of timesteps in [start + n, end] inclusive
 def lag_n_predicate(n, start, end, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -10,6 +11,7 @@ def lag_n_predicate(n, start, end, out_path):
 
     out_file_handle.write(out_file_lines)
 
+# Write series observations (or omit the values to get targets) in range [start_index, end_index] inclusive
 def series_predicate(series_list, series_ids, start_index, end_index, out_path, include_values=True):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -27,6 +29,8 @@ def series_predicate(series_list, series_ids, start_index, end_index, out_path, 
 
     out_file_handle.write(out_file_lines)
 
+# Groups series together into equally-sized clusters and assigns them an ID.
+# Returns a map from cluster ID to the series IDs.
 def series_cluster_predicate(series_ids, cluster_size, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -44,6 +48,7 @@ def series_cluster_predicate(series_ids, cluster_size, out_path):
 
     return cluster_series_map
 
+# Cluster mean predicate. It's an open predicate used in the arithmetic rule relating a cluster's mean to the cluster oracle value.
 def cluster_mean_predicate(cluster_series_map, start_timestep, end_timestep, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -54,6 +59,9 @@ def cluster_mean_predicate(cluster_series_map, start_timestep, end_timestep, out
 
     out_file_handle.write(out_file_lines)
 
+# Cluster oracle predicate, contains the true aggregate series values with respect to each cluster.
+# Option to add noise.
+# Values are for timesteps in [start_index, end_index] inclusive.
 def cluster_oracle_predicate(series_list, cluster_series_map, noise_sigma, start_index, end_index, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -67,6 +75,7 @@ def cluster_oracle_predicate(series_list, cluster_series_map, noise_sigma, start
 
     out_file_handle.write(out_file_lines)
 
+# TODO @Alex: Return forecasted series to use later in FP-based adjustment
 def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_series_list, start_index, end_index, n, out_path, adj_out_path):
     out_file_handle = open(out_path, "w")
     adj_out_file_handle = open(adj_out_path, "w")
@@ -88,11 +97,18 @@ def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_seri
     out_file_handle.write(out_file_lines)
     adj_out_file_handle.write(adj_out_file_lines)
 
-def fp_ar_baseline_predicate(series_list, coefs_and_biases, series_ids, cluster_series_map, agg_series_list)
+"""
+def fp_ar_baseline_predicate(base_forecast_series_list, coefs_and_biases, series_ids, cluster_series_map, agg_series_list)
+    for cluster_id in cluster_series_map:
+        base_forecasts = [base_forecast_series_list[series_id] for series_id in cluster_series_map[cluster_id]]
+        agg_series = agg_series_list[cluster_id]
 
-# fp_adjust_ar_forecast(series, agg_series)
+        coherent_forecasts = fp_adjust_ar_forecast(base_forecasts, agg_series)
 
+        for series_idx in range(len(coherent_forecasts)):
+"""
 
+# Series blocking for the AR arithmetic rules.
 def series_block_predicate(series_ids, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -102,6 +118,7 @@ def series_block_predicate(series_ids, out_path):
 
     out_file_handle.write(out_file_lines)
 
+# Agg series predicate. It's an open predicate used in an arithmetic rule relating the mean of the current forecast window to the oracle value.
 def agg_series_predicate(series_ids, start_index, end_index, window_size, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -118,6 +135,7 @@ def agg_series_predicate(series_ids, start_index, end_index, window_size, out_pa
 
     out_file_handle.write(out_file_lines)
 
+# TODO @Alex: Predict based on historical mean, not true mean of current forecast window.
 def naive_prediction_predicate(agg_series_list, series_ids, window_start_idx, window_end_idx, window_size, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -129,7 +147,7 @@ def naive_prediction_predicate(agg_series_list, series_ids, window_start_idx, wi
 
     out_file_handle.write(out_file_lines)
 
-# The end index is one after the last time step we're including in the aggregation windows
+# IsInWindow predicate. Relates timesteps to the forecast windows that contain them.
 def time_in_aggregate_window_predicate(start_index, end_index, window_size, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
@@ -151,6 +169,7 @@ def time_in_aggregate_window_predicate(start_index, end_index, window_size, out_
 
     out_file_handle.write(out_file_lines)
 
+# Compute aggregate series of an individual base-level series (a series of means of equally-sized, adjacent segments)
 def generate_aggregate_series(series, start_index, end_index, window_size):
     agg_series = np.array([])
 
@@ -168,7 +187,7 @@ def generate_aggregate_series(series, start_index, end_index, window_size):
 
     return agg_series
 
-# Takes aggregate series as in put and adds noise to them
+# Oracle series predicate. Equivalent to the true aggregate series value but optionally has noise added to it.
 def oracle_series_predicate(series_list, series_ids, start_index, end_index, noise_sigma, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""

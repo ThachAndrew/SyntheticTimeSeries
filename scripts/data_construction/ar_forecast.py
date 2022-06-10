@@ -7,13 +7,14 @@ def ar_forecast(x, coefs, bias, n):
 
     return x[-n:]
 
+# Bias AR forecasts so their mean is equal to some specified value
 def top_down_adjust_ar_forecast(forecast, mean):
     forecast_mean = np.mean(forecast)
     adj_bias = mean - forecast_mean
 
     return forecast + adj_bias
 
-# Adjust forecast to be coherent based on forecast proportions
+# Adjust forecasts to be coherent based on forecast proportions
 def fp_adjust_ar_forecast(series, agg_series):
     coherent_forecasts = [[] for x in range(len(series))]
 

@@ -20,7 +20,7 @@ DATA_PATH = "data"
 MODEL_PATH = "timeseries_models"
 EXPERIMENT_NAME = "test_experiment_t"
 
-NUM_SERIES_GENERATED = 5000
+NUM_SERIES_GENERATED = 200
 VARIANCE_LOWER_PERCENTILE = 40
 VARIANCE_UPPER_PERCENTILE = 60
 WINDOW_SIZE = 10
@@ -35,8 +35,8 @@ MIN_VARIANCE = 10 ** -1
 
 SEED = 55555
 
-BASE_SERIES_NOISE_SIGMAS = [0.25, 0.5, 0.75, 1.0, 1.25]
-ORACLE_SERIES_NOISE_SIGMAS = [0.25, 0.5, 0.75, 1.0, 1.25]
+BASE_SERIES_NOISE_SIGMAS = [0.25]
+ORACLE_SERIES_NOISE_SIGMAS = []
 
 def generate_wn(n, sigma=1):
     return np.random.normal(0, sigma, size=n)
@@ -113,48 +113,27 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
         os.makedirs(initial_window_dir)
 
     # Time step and window lags
-
+    # LagN predicates
     for lag in lags:
         predicate_constructors.lag_n_predicate(lag, 0, SERIES_LENGTH - 1,
                                                os.path.join(initial_window_dir, "Lag" + str(lag) + "_obs.txt"))
 
     # Series block for specialization
+    # SeriesBlock predicate
     predicate_constructors.series_block_predicate(series_ids, os.path.join(initial_window_dir, "SeriesBlock_obs.txt"))
 
     # Assign times to windows for use in hierarchical rule, IsInWindow predicate
+    # IsInWindow predicate
     predicate_constructors.time_in_aggregate_window_predicate(0, SERIES_LENGTH - 1, WINDOW_SIZE,
                                                               os.path.join(initial_window_dir,
                                                                            "IsInWindow_obs.txt"))
 
 
-    # First time step series values
+    # Series predicate
+    # Initial segment series values
     predicate_constructors.series_predicate(generated_series, series_ids, INITIAL_SEGMENT_SIZE - (WINDOW_SIZE + 1), INITIAL_SEGMENT_SIZE - 1,
                                             os.path.join(initial_window_dir, "Series_obs.txt"),
                                             include_values=True)
-
-    # Cluster stations, then sum series within clusters to generate oracle series, and create targets for the ClusterMean predicate
-    cluster_series_map = predicate_constructors.series_cluster_predicate(series_ids, 5, os.path.join(initial_window_dir, "SeriesCluster_obs.txt"))
-    predicate_constructors.cluster_oracle_predicate(generated_series, cluster_series_map, cluster_oracle_noise_sigma, 0, SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterOracle_obs.txt"))
-
-    predicate_constructors.cluster_mean_predicate(cluster_series_map, INITIAL_SEGMENT_SIZE - (WINDOW_SIZE + 1), SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterMean_target.txt"))
-
-    agg_series = [predicate_constructors.generate_aggregate_series(series, 0, SERIES_LENGTH - 1, WINDOW_SIZE) for series in generated_series]
-
-    predicate_constructors.oracle_series_predicate(agg_series, series_ids, 0, int(round(SERIES_LENGTH/WINDOW_SIZE)) - 1, oracle_noise_sigma,
-                                                   os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
-
-    predicate_constructors.naive_prediction_predicate(agg_series, series_ids, int(INITIAL_SEGMENT_SIZE / WINDOW_SIZE), int(INITIAL_SEGMENT_SIZE / WINDOW_SIZE) + 1, WINDOW_SIZE, os.path.join(initial_window_dir, "NaiveBaseline_obs.txt"))
-
-    # AR Baseline; not used in model, but used for evaluation.
-    predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1)] for series in agg_series], 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
-                                                 os.path.join(initial_window_dir,  "ARBaseline_obs.txt"), os.path.join(initial_window_dir,  "ARBaselineAdj_obs.txt"))
-
-    if cluster_hierarchy:
-        predicate_constructors.fp_ar_baseline_predicate()
-
-    #exit(1)
-    predicate_constructors.agg_series_predicate(series_ids, 0, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE,
-                                                os.path.join(initial_window_dir, "AggSeries_target.txt"))
 
     # Truth & targets for initial forecast window
     predicate_constructors.series_predicate(generated_series, series_ids, INITIAL_SEGMENT_SIZE, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1,
@@ -164,6 +143,37 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
     predicate_constructors.series_predicate(generated_series, series_ids, INITIAL_SEGMENT_SIZE, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1,
                                             os.path.join(initial_window_dir, "Series_truth.txt"),
                                             include_values=True)
+
+    # Cluster stations, then sum series within clusters to generate oracle series, and create targets for the ClusterMean predicate
+    # SeriesCluster predicate and ClusterOracle predicate
+    cluster_series_map = predicate_constructors.series_cluster_predicate(series_ids, 5, os.path.join(initial_window_dir, "SeriesCluster_obs.txt"))
+    predicate_constructors.cluster_oracle_predicate(generated_series, cluster_series_map, cluster_oracle_noise_sigma, 0, SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterOracle_obs.txt"))
+
+    # ClusterMean predicate
+    predicate_constructors.cluster_mean_predicate(cluster_series_map, INITIAL_SEGMENT_SIZE - (WINDOW_SIZE + 1), SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterMean_target.txt"))
+
+    # Compute aggregate series used to generate oracle values
+    agg_series = [predicate_constructors.generate_aggregate_series(series, 0, SERIES_LENGTH - 1, WINDOW_SIZE) for series in generated_series]
+
+    # OracleSeries predicate.
+    predicate_constructors.oracle_series_predicate(agg_series, series_ids, 0, int(round(SERIES_LENGTH/WINDOW_SIZE)) - 1, oracle_noise_sigma,
+                                                   os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
+
+    # Naive prediction predicate (WIP, need to make it based on historical means)
+    predicate_constructors.naive_prediction_predicate(agg_series, series_ids, int(INITIAL_SEGMENT_SIZE / WINDOW_SIZE), int(INITIAL_SEGMENT_SIZE / WINDOW_SIZE) + 1, WINDOW_SIZE, os.path.join(initial_window_dir, "NaiveBaseline_obs.txt"))
+
+    # AR Baseline; not used in model, but used for evaluation.
+    # ARBaseline and ARBaselineAdj predicates.
+    predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1)] for series in agg_series], 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
+                                                 os.path.join(initial_window_dir,  "ARBaseline_obs.txt"), os.path.join(initial_window_dir,  "ARBaselineAdj_obs.txt"))
+
+    # WIP ARBaselineFPAdj predicate
+    if cluster_hierarchy:
+        predicate_constructors.fp_ar_baseline_predicate()
+
+    # AggSeries predicate
+    predicate_constructors.agg_series_predicate(series_ids, 0, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE,
+                                                os.path.join(initial_window_dir, "AggSeries_target.txt"))
 
     # First forecast window commands.
     open(os.path.join(initial_window_dir, "commands.txt"), "w").write(
@@ -179,6 +189,7 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
         start_time_step = INITIAL_SEGMENT_SIZE + (window_idx * WINDOW_SIZE)
         end_time_step = start_time_step + WINDOW_SIZE - 1
 
+        # Write series target/truth for current forecast window. Currently only being used for evaluation.
         predicate_constructors.series_predicate(generated_series, series_ids, start_time_step, end_time_step,
                                                 os.path.join(forecast_window_dir, "Series_target.txt"),
                                                 include_values=False)
@@ -187,7 +198,7 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
                                                 os.path.join(forecast_window_dir, "Series_truth.txt"),
                                                 include_values=True)
 
-
+        # Naive prediction for current forecast window, WIP
         predicate_constructors.naive_prediction_predicate(agg_series, series_ids, window_idx + int(INITIAL_SEGMENT_SIZE/WINDOW_SIZE), window_idx + int(INITIAL_SEGMENT_SIZE/WINDOW_SIZE) + 1, WINDOW_SIZE, os.path.join(forecast_window_dir, "NaiveBaseline_obs.txt"))
 
 
@@ -219,7 +230,7 @@ def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, temporal
         hts_model_lines += "Series(+S, T) / |T| = ClusterMean(C, T). {S: SeriesCluster(S, C)} \n"
         hts_model_lines += str(cluster_hierarchical_rule_weight) + ": ClusterMean(C, T) = ClusterOracle(C, T) ^2\n" 
 
-
+    # Add AR rules
     for series_idx in range(len(generated_series)):
         estimated_ar_coefs, bias = coefs_and_biases[series_idx]
 
@@ -232,8 +243,9 @@ def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, temporal
 
     hts_model_file.write(hts_model_lines)
 
+    # Generate data file
+    # TODO @Alex: update with ClusterMean and OracleCluster
     hts_data_file = open(os.path.join(MODEL_PATH, str(model_name), "hts-eval.data"), "w")
-
     hts_data_lines = "predicates:\n"
     for lag in lags:
         hts_data_lines += "   Lag" + str(lag) + "/2: closed\n"
@@ -265,7 +277,7 @@ truth:
 
     return coefs_and_biases
 
-# normalizes a series to a range of [0,1]
+# Normalizes a series to a range of [0,1]
 def normalize(series):
     min_element = min(series)
     max_element = max(series)
@@ -274,6 +286,7 @@ def normalize(series):
 
 #def set_up_experiment(num_series, series_length, forecast_window_width, order, ar_process_noise_sigma, added_noise_sigma, oracle_noise_sigma, experiment_dir):
 
+# TODO @Alex: Implement a subroutine for setting up an experiment, drop an options file w/ relevant parameters.
 def main():
     # Experiment 1
     for base_series_noise_sigma in BASE_SERIES_NOISE_SIGMAS:
@@ -295,7 +308,7 @@ def main():
 
         # Generate random AR data
         np.random.seed(SEED)
-        generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED, enforce_nonstationarity=True)
+        generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED, enforce_nonstationarity=False)
 
         # Filter out series that aren't between the two thresholds.
         filtered_generated_series = []
@@ -320,6 +333,7 @@ def main():
                 continue
 
             if lower_var_threshold <= np.var(series) and np.var(series) <= upper_var_threshold:
+                print(np.std(series))
                 filtered_generated_series += [series]
                 filtered_true_coefs += [true_coefs[series_idx]]
 
@@ -351,7 +365,7 @@ def main():
 
         # Generate random AR data
         np.random.seed(SEED)
-        generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED, enforce_nonstationarity=True)
+        generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED, enforce_nonstationarity=False)
 
         # Filter out series that aren't between the two thresholds.
         filtered_generated_series = []
@@ -408,7 +422,7 @@ def main():
 
     # Generate random AR data
     np.random.seed(SEED)
-    generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED, enforce_nonstationarity=True)
+    generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period, seed=SEED, enforce_nonstationarity=False)
 
     # Filter out series that aren't between the two thresholds.
     filtered_generated_series = []
@@ -418,7 +432,7 @@ def main():
     for series_idx in range(len(generated_series)):
         if add_noise:
             generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], 0,
-                                                                            base_series_noise_sigma, SEED)
+                                                                            0.5, SEED)
         generated_series[series_idx] = normalize(generated_series[series_idx])
 
     variances = [np.var(series) for series in generated_series]
@@ -444,7 +458,7 @@ def main():
     # Set up first experiment
     experiment_dir = os.path.join(DATA_PATH, "E3", "eval")
     forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
-    build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
+    build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, 0.0, lags, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
 
 if __name__ == '__main__':
     main()
