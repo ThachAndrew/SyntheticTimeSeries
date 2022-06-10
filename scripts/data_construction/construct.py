@@ -35,7 +35,10 @@ MIN_VARIANCE = 10 ** -1
 
 SEED = 55555
 
+# Experiment 1 only: base series noise scale
 BASE_SERIES_NOISE_SIGMAS = [0.25]
+
+# Experiment 2 only: oracle series noise scale
 ORACLE_SERIES_NOISE_SIGMAS = []
 
 def generate_wn(n, sigma=1):
@@ -208,6 +211,7 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
             command_constructor.create_forecast_window_commands(generated_series, series_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx,
                                                                 int(np.rint(INITIAL_SEGMENT_SIZE / WINDOW_SIZE)) + window_idx))
 
+# Fits AR models to a list of series
 def fit_ar_models(generated_series, start_idx, end_idx, lags):
     coefs_and_biases = dict()
 
@@ -218,6 +222,8 @@ def fit_ar_models(generated_series, start_idx, end_idx, lags):
 
     return coefs_and_biases
 
+# Generate hierarchical time series PSL models and data files.
+# TODO @Alex: Update with ClusterMean and OracleCluster
 def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, temporal_hierarchical_rule_weight=1.0, cluster_hierarchical_rule_weight=1.0, cluster_rules=False):
     if not os.path.exists(os.path.join(MODEL_PATH, str(model_name))):
         os.makedirs(os.path.join(MODEL_PATH, str(model_name)))
@@ -244,7 +250,6 @@ def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, temporal
     hts_model_file.write(hts_model_lines)
 
     # Generate data file
-    # TODO @Alex: update with ClusterMean and OracleCluster
     hts_data_file = open(os.path.join(MODEL_PATH, str(model_name), "hts-eval.data"), "w")
     hts_data_lines = "predicates:\n"
     for lag in lags:
