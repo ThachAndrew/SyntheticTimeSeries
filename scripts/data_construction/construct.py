@@ -20,7 +20,7 @@ DATA_PATH = "data"
 MODEL_PATH = "timeseries_models"
 EXPERIMENT_NAME = "test_experiment_t"
 
-NUM_SERIES_GENERATED = 200
+NUM_SERIES_GENERATED = 25
 VARIANCE_LOWER_PERCENTILE = 40
 VARIANCE_UPPER_PERCENTILE = 60
 WINDOW_SIZE = 10
@@ -102,7 +102,8 @@ def generate_multiple_series(num_series, length, p, P, period, seed, enforce_non
 
     return series, coefs
 
-def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, num_windows, experiment_dir, forecast_window_dirs, cluster_hierarchy=False):
+def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, num_windows, experiment_dir, forecast_window_dirs,
+                   cluster_hierarchy=False, cluster_size=5):
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
 
@@ -147,13 +148,15 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
                                             os.path.join(initial_window_dir, "Series_truth.txt"),
                                             include_values=True)
 
-    # Cluster stations, then sum series within clusters to generate oracle series, and create targets for the ClusterMean predicate
-    # SeriesCluster predicate and ClusterOracle predicate
-    cluster_series_map = predicate_constructors.series_cluster_predicate(series_ids, 5, os.path.join(initial_window_dir, "SeriesCluster_obs.txt"))
-    predicate_constructors.cluster_oracle_predicate(generated_series, cluster_series_map, cluster_oracle_noise_sigma, 0, SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterOracle_obs.txt"))
 
-    # ClusterMean predicate
-    predicate_constructors.cluster_mean_predicate(cluster_series_map, INITIAL_SEGMENT_SIZE - (WINDOW_SIZE + 1), SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterMean_target.txt"))
+    if cluster_hierarchy:
+        # Cluster stations, then sum series within clusters to generate oracle series, and create targets for the ClusterMean predicate
+        # SeriesCluster predicate and ClusterOracle predicate
+        cluster_series_map, cluster_agg_series_list = predicate_constructors.series_cluster_predicate(generated_series, series_ids, cluster_size, os.path.join(initial_window_dir, "SeriesCluster_obs.txt"))
+        predicate_constructors.cluster_oracle_predicate(generated_series, cluster_series_map, cluster_oracle_noise_sigma, 0, SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterOracle_obs.txt"))
+
+        # ClusterMean predicate
+        predicate_constructors.cluster_mean_predicate(cluster_series_map, INITIAL_SEGMENT_SIZE - (WINDOW_SIZE + 1), SERIES_LENGTH - 1, os.path.join(initial_window_dir, "ClusterMean_target.txt"))
 
     # Compute aggregate series used to generate oracle values
     agg_series = [predicate_constructors.generate_aggregate_series(series, 0, SERIES_LENGTH - 1, WINDOW_SIZE) for series in generated_series]
@@ -167,12 +170,11 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
 
     # AR Baseline; not used in model, but used for evaluation.
     # ARBaseline and ARBaselineAdj predicates.
-    predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1)] for series in agg_series], 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
+    base_forecast_series_list = predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1)] for series in agg_series], 0, INITIAL_SEGMENT_SIZE - 1, WINDOW_SIZE,
                                                  os.path.join(initial_window_dir,  "ARBaseline_obs.txt"), os.path.join(initial_window_dir,  "ARBaselineAdj_obs.txt"))
-
-    # WIP ARBaselineFPAdj predicate
     if cluster_hierarchy:
-        predicate_constructors.fp_ar_baseline_predicate()
+        predicate_constructors.fp_ar_baseline_predicate(base_forecast_series_list, cluster_series_map, cluster_agg_series_list, INITIAL_SEGMENT_SIZE, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1,
+                             os.path.join(initial_window_dir, "ARBaselineFP_obs.txt"))
 
     # AggSeries predicate
     predicate_constructors.agg_series_predicate(series_ids, 0, INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE,
@@ -260,6 +262,9 @@ def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, temporal
    AggSeries/2: open
    IsInWindow/2: closed
    SeriesBlock/2: closed
+   ClusterMean/2: open
+   SeriesCluster/2: closed
+   ClusterOracle/2: closed
 
 observations:\n"""
 
@@ -270,9 +275,12 @@ observations:\n"""
    IsInWindow: ../data/hts/eval/000/IsInWindow_obs.txt
    SeriesBlock: ../data/hts/eval/000/SeriesBlock_obs.txt
    OracleSeries: ../data/hts/eval/000/OracleSeries_obs.txt
+   SeriesCluster: ../data/hts/eval/000/SeriesCluster_obs.txt
+   ClusterOracle: ../data/hts/eval/000/ClusterOracle_obs.txt
 
 targets:
    Series: ../data/hts/eval/000/Series_target.txt
+   
 
 truth:
    Series: ../data/hts/eval/000/Series_truth.txt
@@ -291,8 +299,141 @@ def normalize(series):
 
 #def set_up_experiment(num_series, series_length, forecast_window_width, order, ar_process_noise_sigma, added_noise_sigma, oracle_noise_sigma, experiment_dir):
 
-# TODO @Alex: Implement a subroutine for setting up an experiment, drop an options file w/ relevant parameters.
+def set_up_experiment(p, P, period, add_noise, base_noise_scale, cluster_noise_scale, oracle_noise_scale, experiment_data_dir, experiment_model_name,
+                      temporal_hierarchy_rule_weight=100.0,
+                      cluster_hierarchy_rule_weight=100.0,
+                      cluster_hierarchy=False, cluster_size=5):
+    # Lags present in the (S)AR model, computed from its order.
+    lags = np.zeros(p + P)
+    lags[:p] = np.arange(p) + 1
+    lags[p:] = period * (np.arange(P) + 1)
+    lags = lags.astype(int)
+
+    # Generate random AR data
+    np.random.seed(SEED)
+    generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period,
+                                                            seed=SEED, enforce_nonstationarity=False)
+
+    # Filter out series that aren't between the two thresholds.
+    filtered_generated_series = []
+    filtered_true_coefs = []
+
+    # Add noise and normalize
+    for series_idx in range(len(generated_series)):
+        if add_noise:
+            generated_series[series_idx] = time_series_noise.add_gaussian_noise(generated_series[series_idx], 0,
+                                                                                base_noise_scale, SEED)
+        generated_series[series_idx] = normalize(generated_series[series_idx])
+
+    variances = [np.var(series) for series in generated_series]
+
+    # Compute upper and lower variance thresholds, which requires discarding inf. or undef. variance series
+    upper_var_threshold = np.percentile(variances, VARIANCE_UPPER_PERCENTILE)
+    lower_var_threshold = np.percentile(variances, VARIANCE_LOWER_PERCENTILE)
+
+    # Filter
+    for series_idx, series in enumerate(generated_series):
+        if np.isnan(np.var(series)) or np.isinf(np.var(series)):
+            continue
+
+        if lower_var_threshold <= np.var(series) and np.var(series) <= upper_var_threshold:
+            filtered_generated_series += [series]
+            filtered_true_coefs += [true_coefs[series_idx]]
+
+    generated_series = filtered_generated_series
+    coefs_and_biases = fit_ar_models(generated_series, 0, INITIAL_SEGMENT_SIZE, lags)
+
+    if cluster_hierarchy:
+        gen_hts_model(generated_series, coefs_and_biases, experiment_model_name, lags,
+                      temporal_hierarchical_rule_weight=temporal_hierarchy_rule_weight, cluster_hierarchical_rule_weight=cluster_hierarchy_rule_weight,
+                      cluster_rules=True)
+    else:
+        gen_hts_model(generated_series, coefs_and_biases, experiment_model_name, lags, temporal_hierarchical_rule_weight=100.0)
+
+    # Set up first experiment
+    experiment_dir = os.path.join(DATA_PATH, experiment_data_dir, "eval")
+    forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
+    build_psl_data(generated_series, coefs_and_biases, cluster_noise_scale, oracle_noise_scale, lags,
+                   NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs, cluster_hierarchy=cluster_hierarchy)
+
+    options_file_handle = open(os.path.join(DATA_PATH, experiment_data_dir, "options.txt"), "w")
+    options_file_lines = "p\t" + str(p) + "\nP\t" + str(P) + "\nWindow_size\t" + str(WINDOW_SIZE) + \
+                         "\nSeed\t" + str(SEED) + "\nBase_series_noise_scale\t" + str(base_noise_scale) + \
+                         "\nOracle_series_noise_scale\t" + str(oracle_noise_scale) + "\nCluster_size\t" + str(cluster_size) + "\n"
+    options_file_handle.write(options_file_lines)
+
 def main():
+    # Experiment 1: Vary noise added to base-level series.
+    E1_base_noise_scales = [0.25, 0.5, 0.75, 1.0, 1.25]
+
+    p = 2
+    P = 0
+    period = 10
+    add_noise = True
+
+    E1_cluster_noise_scale = 0
+    E1_oracle_noise_scale = 0
+    experiment_data_dir = "E1_base_noise"
+    experiment_model_name = "E1_base_noise"
+
+    for base_noise_scale in E1_base_noise_scales:
+        set_up_experiment(p, P, period, add_noise, base_noise_scale, E1_cluster_noise_scale, E1_oracle_noise_scale,
+                          experiment_data_dir + "_" + str(round(base_noise_scale, 3)),
+                          experiment_model_name + "_" + str(round(base_noise_scale, 3)),
+                          temporal_hierarchy_rule_weight=100.0,
+                          cluster_hierarchy_rule_weight=100.0,
+                          cluster_hierarchy=True, cluster_size=5)
+
+    p = 2
+    P = 0
+    period = 10
+    add_noise = True
+
+    E2_oracle_noise_scales = [0.25, 0.5, 0.75, 1.0, 1.25]
+    E2_base_noise_scale = 0.5
+    E2_cluster_oracle_noise_scale = 0
+
+    # Experiment 2: Vary noise added to aggregate series
+    experiment_data_dir = "E2_oracle_noise"
+    experiment_model_name = "E2_oracle_noise"
+
+    for oracle_noise_scale in E2_oracle_noise_scales:
+        set_up_experiment(p, P, period, add_noise, E2_base_noise_scale, E2_cluster_oracle_noise_scale, oracle_noise_scale,
+                          experiment_data_dir + "_" + str(round(oracle_noise_scale, 3)),
+                          experiment_model_name + "_" + str(round(oracle_noise_scale, 3)),
+                          temporal_hierarchy_rule_weight=100.0,
+                          cluster_hierarchy_rule_weight=100.0,
+                          cluster_hierarchy=False, cluster_size=5)
+
+    p = 2
+    P = 0
+    period = 10
+    add_noise = True
+
+    E3_base_noise_scale = 0.5
+    E3_oracle_noise_scale = 0
+    E3_cluster_oracle_noise_scale = 0
+
+    experiment_data_dir = "E3_temporal"
+    experiment_model_name = "E3_temporal"
+
+    set_up_experiment(p, P, period, add_noise, E3_base_noise_scale, E3_cluster_oracle_noise_scale, E3_oracle_noise_scale,
+                      experiment_data_dir + "_" + str(round(E3_base_noise_scale, 3)),
+                      experiment_model_name + "_" + str(round(E3_base_noise_scale, 3)),
+                      temporal_hierarchy_rule_weight=100.0,
+                      cluster_hierarchy_rule_weight=100.0,
+                      cluster_hierarchy=False, cluster_size=5)
+
+    experiment_data_dir = "E3_temporal_cluster"
+    experiment_model_name = "E3_temporal_cluster"
+
+    set_up_experiment(p, P, period, add_noise, E3_base_noise_scale, E3_cluster_oracle_noise_scale, E3_oracle_noise_scale,
+                      experiment_data_dir + "_" + str(round(E3_base_noise_scale, 3)),
+                      experiment_model_name + "_" + str(round(E3_base_noise_scale, 3)),
+                      temporal_hierarchy_rule_weight=100.0,
+                      cluster_hierarchy_rule_weight=100.0,
+                      cluster_hierarchy=True, cluster_size=5)
+    """
     # Experiment 1
     for base_series_noise_sigma in BASE_SERIES_NOISE_SIGMAS:
         # Order of (S)AR model
@@ -464,6 +605,6 @@ def main():
     experiment_dir = os.path.join(DATA_PATH, "E3", "eval")
     forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(NUM_FORECAST_WINDOWS)]
     build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, 0.0, lags, NUM_FORECAST_WINDOWS, experiment_dir, forecast_window_dirs)
-
+    """
 if __name__ == '__main__':
     main()

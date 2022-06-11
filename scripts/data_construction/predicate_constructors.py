@@ -23,7 +23,7 @@ def series_predicate(series_list, series_ids, start_index, end_index, out_path, 
             out_file_lines += str(series_ids[series_idx]) + "\t" + str(time_step)
 
             if include_values:
-                out_file_lines += "\t" + str(series[time_step_idx])
+                out_file_lines += "\t" + str(series[time_step])
 
             out_file_lines += "\n"
 
@@ -31,7 +31,7 @@ def series_predicate(series_list, series_ids, start_index, end_index, out_path, 
 
 # Groups series together into equally-sized clusters and assigns them an ID.
 # Returns a map from cluster ID to the series IDs.
-def series_cluster_predicate(series_ids, cluster_size, out_path):
+def series_cluster_predicate(series_list, series_ids, cluster_size, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
 
@@ -44,9 +44,14 @@ def series_cluster_predicate(series_ids, cluster_size, out_path):
             cluster_series_map[cluster] = []
         cluster_series_map[cluster] += [series_id]
 
+    cluster_agg_series_list = []
+
+    for cluster_id in cluster_series_map:
+        cluster_agg_series_list += [np.sum([series_list[series_id] for series_id in cluster_series_map[cluster_id]], axis=0)]
+
     out_file_handle.write(out_file_lines)
 
-    return cluster_series_map
+    return cluster_series_map, cluster_agg_series_list
 
 # Cluster mean predicate. It's an open predicate used in the arithmetic rule relating a cluster's mean to the cluster oracle value.
 def cluster_mean_predicate(cluster_series_map, start_timestep, end_timestep, out_path):
@@ -75,18 +80,21 @@ def cluster_oracle_predicate(series_list, cluster_series_map, noise_sigma, start
 
     out_file_handle.write(out_file_lines)
 
-# TODO @Alex: Return forecasted series to use later in FP-based adjustment
 def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_series_list, start_index, end_index, n, out_path, adj_out_path):
     out_file_handle = open(out_path, "w")
     adj_out_file_handle = open(adj_out_path, "w")
     out_file_lines = ""
     adj_out_file_lines = ""
 
+    base_ar_forecasts = [[] for series in series_list]
+
     for series_idx, series in enumerate(series_list):
         series = series[start_index:end_index+1]
 
         coefs, bias = coefs_and_biases[series_idx]
         forecast = np.clip(ar_forecast(series, coefs, bias, n), 0, 1)
+        base_ar_forecasts[series_idx] = forecast
+
         adj_forecast = top_down_adjust_ar_forecast(forecast, oracle_series_list[series_idx])
 
         for time_step_idx in range(n):
@@ -97,16 +105,25 @@ def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_seri
     out_file_handle.write(out_file_lines)
     adj_out_file_handle.write(adj_out_file_lines)
 
-"""
-def fp_ar_baseline_predicate(base_forecast_series_list, coefs_and_biases, series_ids, cluster_series_map, agg_series_list)
+    return base_ar_forecasts
+
+def fp_ar_baseline_predicate(base_forecast_series_list, cluster_series_map, cluster_agg_series_list, start, end, out_path):
+    out_file_handle = open(out_path, "w")
+    out_file_lines = ""
+
     for cluster_id in cluster_series_map:
         base_forecasts = [base_forecast_series_list[series_id] for series_id in cluster_series_map[cluster_id]]
-        agg_series = agg_series_list[cluster_id]
+        agg_series = cluster_agg_series_list[cluster_id]
 
-        coherent_forecasts = fp_adjust_ar_forecast(base_forecasts, agg_series)
+        coherent_forecasts = fp_adjust_ar_forecast(base_forecasts, agg_series[start:end + 1])
 
-        for series_idx in range(len(coherent_forecasts)):
-"""
+        for series_idx in range(len(cluster_series_map[cluster_id])):
+            for timestep in range(start, end + 1):
+                out_file_lines += str(cluster_series_map[cluster_id][series_idx]) + "\t" + str(timestep) + "\t" + str(coherent_forecasts[series_idx][timestep - start]) + "\n"
+
+    out_file_handle.write(out_file_lines)
+
+
 
 # Series blocking for the AR arithmetic rules.
 def series_block_predicate(series_ids, out_path):
