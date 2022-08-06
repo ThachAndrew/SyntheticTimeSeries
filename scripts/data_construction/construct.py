@@ -215,7 +215,6 @@ def fit_ar_models(generated_series, start_idx, end_idx, lags):
     return coefs_and_biases
 
 # Generate hierarchical time series PSL models and data files.
-# TODO @Alex: Update with ClusterMean and OracleCluster
 def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, temporal_hierarchical_rule_weight=1.0, cluster_hierarchical_rule_weight=1.0, cluster_rules=False):
     if not os.path.exists(os.path.join(MODEL_PATH, str(model_name))):
         os.makedirs(os.path.join(MODEL_PATH, str(model_name)))

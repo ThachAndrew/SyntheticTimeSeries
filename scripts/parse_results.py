@@ -7,7 +7,7 @@ from sklearn.metrics import r2_score
 
 INFERRED_PREDICATE_FILE_NAME = "SERIES.txt"
 TRUTH_PREDICATE_FILE_NAME = "Series_truth.txt"
-AR_BASELINE_FILE_NAME = "ARBaseline_obs.txt"
+AR_BASELINE_FILE_NAME = "NaiveBaseline_obs.txt"
 
 OUT_FILE_NAME = "ar_vs_psl_metrics.tsv"
 
