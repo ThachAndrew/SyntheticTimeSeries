@@ -46,7 +46,7 @@ def create_command_line(action_type, partition_name, predicate_name, predicate_c
     elif action_type == DELETE:
         return DELETE + "\t" + partition_str + "\t" + predicate_name + "(" + constants_list + ")"
 
-def create_forecast_window_commands(all_series, series_ids, start, end, window_size, forecast_window_idx, agg_window_idx):
+def create_forecast_window_commands(all_series, series_ids, cluster_ids, start, end, window_size, forecast_window_idx, agg_window_idx, cluster=False):
     command_lines = ""
     if forecast_window_idx > 0:
         for idx, series in enumerate(all_series):
@@ -54,6 +54,12 @@ def create_forecast_window_commands(all_series, series_ids, start, end, window_s
                                                  None) + "\n"
             for timestep in range(start - window_size, start):
                 command_lines += create_command_line(OBSERVE, OBS, "Series", [series_ids[idx], timestep], series[timestep]) + "\n"
+
+        if cluster:
+            for idx in range(len(cluster_ids)):
+                for timestep in range(start, end + 1):
+                    command_lines += create_command_line(ADD, TARGET, "ClusterMean", [cluster_ids[idx], timestep],
+                                                     None) + "\n"
 
     for idx, series in enumerate(all_series):
         for timestep in range(start, end + 1):

@@ -10,7 +10,7 @@ DATA_PATH = "data"
 MODEL_PATH = "timeseries_models"
 EXPERIMENT_NAME = "test_experiment_t"
 
-NUM_SERIES_GENERATED = 25
+NUM_SERIES_GENERATED = 250
 VARIANCE_LOWER_PERCENTILE = 40
 VARIANCE_UPPER_PERCENTILE = 60
 WINDOW_SIZE = 10
@@ -99,6 +99,7 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
 
     # Construct series ID constants
     series_ids = np.arange(len(generated_series))
+    cluster_ids = np.arange(int(len(generated_series) / cluster_size))
 
     # Static predicates
     initial_window_dir = os.path.join(experiment_dir, forecast_window_dirs[0])
@@ -172,8 +173,9 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
 
     # First forecast window commands.
     open(os.path.join(initial_window_dir, "commands.txt"), "w").write(
-        command_constructor.create_forecast_window_commands(generated_series, series_ids, INITIAL_SEGMENT_SIZE,
-                                                            INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE, 0, int(np.rint(INITIAL_SEGMENT_SIZE / WINDOW_SIZE))))
+        command_constructor.create_forecast_window_commands(generated_series, series_ids, cluster_ids, INITIAL_SEGMENT_SIZE,
+                                                            INITIAL_SEGMENT_SIZE + WINDOW_SIZE - 1, WINDOW_SIZE, 0, int(np.rint(INITIAL_SEGMENT_SIZE / WINDOW_SIZE)),
+                                                            cluster=cluster_hierarchy))
 
     for window_idx in range(1, num_windows):
         forecast_window_dir = os.path.join(experiment_dir, forecast_window_dirs[window_idx])
@@ -200,8 +202,8 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
         # AR Baseline; not used in model, but used for evaluation.
         predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((INITIAL_SEGMENT_SIZE + WINDOW_SIZE)/WINDOW_SIZE - 1 + window_idx)] for series in agg_series], 0, start_time_step - 1, WINDOW_SIZE, os.path.join(forecast_window_dir, "ARBaseline_obs.txt"), os.path.join(forecast_window_dir, "ARBaselineAdj_obs.txt"))
         open(os.path.join(forecast_window_dir, "commands.txt"), "w").write(
-            command_constructor.create_forecast_window_commands(generated_series, series_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx,
-                                                                int(np.rint(INITIAL_SEGMENT_SIZE / WINDOW_SIZE)) + window_idx))
+            command_constructor.create_forecast_window_commands(generated_series, series_ids, cluster_ids, start_time_step, end_time_step, WINDOW_SIZE, window_idx,
+                                                                int(np.rint(INITIAL_SEGMENT_SIZE / WINDOW_SIZE)) + window_idx, cluster=cluster_hierarchy))
 
 # Fits AR models to a list of series
 def fit_ar_models(generated_series, start_idx, end_idx, lags):
@@ -286,8 +288,6 @@ def normalize(series):
 
     return [(float(i)-min_element)/(max_element-min_element) for i in series]
 
-#def set_up_experiment(num_series, series_length, forecast_window_width, order, ar_process_noise_sigma, added_noise_sigma, oracle_noise_sigma, experiment_dir):
-
 def set_up_experiment(p, P, period, add_noise, base_noise_scale, cluster_noise_scale, oracle_noise_scale, experiment_data_dir, experiment_model_name,
                       temporal_hierarchy_rule_weight=100.0,
                       cluster_hierarchy_rule_weight=100.0,
@@ -352,13 +352,18 @@ def set_up_experiment(p, P, period, add_noise, base_noise_scale, cluster_noise_s
     options_file_handle.write(options_file_lines)
 
 def main():
-    # Experiment 1: Vary noise added to base-level series.
-    E1_base_noise_scales = [0.25, 0.5, 0.75, 1.0, 1.25]
-
+    # Common parameters across experiments
     p = 2
     P = 0
+
+    # Seasonal period - doesn't get used unless P > 0
     period = 10
+
+    # Refers to adding noise after initial AR data generation.
     add_noise = True
+
+    # Experiment 1: Vary noise added to base-level series.
+    E1_base_noise_scales = [0.25, 0.5, 0.75, 1.0, 1.25]
 
     E1_cluster_noise_scale = 0
     E1_oracle_noise_scale = 0
@@ -372,11 +377,6 @@ def main():
                           temporal_hierarchy_rule_weight=100.0,
                           cluster_hierarchy_rule_weight=100.0,
                           cluster_hierarchy=True, cluster_size=5)
-
-    p = 2
-    P = 0
-    period = 10
-    add_noise = True
 
     E2_oracle_noise_scales = [0.25, 0.5, 0.75, 1.0, 1.25]
     E2_base_noise_scale = 0.5
@@ -393,11 +393,6 @@ def main():
                           temporal_hierarchy_rule_weight=100.0,
                           cluster_hierarchy_rule_weight=100.0,
                           cluster_hierarchy=False, cluster_size=5)
-
-    p = 2
-    P = 0
-    period = 10
-    add_noise = True
 
     E3_base_noise_scale = 0.5
     E3_oracle_noise_scale = 0
@@ -422,6 +417,8 @@ def main():
                       temporal_hierarchy_rule_weight=100.0,
                       cluster_hierarchy_rule_weight=100.0,
                       cluster_hierarchy=True, cluster_size=5)
+
+    # E4 - Vary scale of cluster-series-oracle noise?
 
 if __name__ == '__main__':
     main()
