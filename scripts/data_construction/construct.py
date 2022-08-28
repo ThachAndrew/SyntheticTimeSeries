@@ -3,7 +3,16 @@ import predicate_constructors
 import estimate_AR_coefs
 import time_series_noise
 
+from datetime import datetime
+from statsmodels.tsa.statespace.varmax import VARMAX
+from statsmodels.tsa.stattools import acf, adfuller
+from statsmodels.graphics.tsaplots import plot_acf
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.regression.linear_model import yule_walker
+from statsmodels.tsa.vector_ar.var_model import VAR
+
 import numpy as np
+import matplotlib.pyplot as plt
 import os
 
 DATA_PATH = "data"
@@ -13,7 +22,7 @@ EXPERIMENT_NAME = "test_experiment_t"
 NUM_SERIES_GENERATED = 250
 VARIANCE_LOWER_PERCENTILE = 40
 VARIANCE_UPPER_PERCENTILE = 60
-WINDOW_SIZE = 10
+WINDOW_SIZE = 6
 
 INITIAL_SEGMENT_SIZE = 1000
 INITIAL_SEGMENT_SIZE += (WINDOW_SIZE - (INITIAL_SEGMENT_SIZE % WINDOW_SIZE))
@@ -54,6 +63,30 @@ def generate_ar(n, phis, sigma=1):
 
     return ar
 
+# Return k series of length n with:
+# - given AR coefs
+# - specified means (probably 0s here)
+# - a kxk covariance matrix
+# (Optional scale for initializing values)
+def generate_ar_cluster(series_count, n, coefs, means, e_cov, init_value_scale=1):
+    p = coefs.shape[1]
+    adj_n = n + p
+    errors = np.random.multivariate_normal(means, e_cov, n).T
+    initial_values = np.random.normal(0, init_value_scale, (series_count, p))
+
+    final_series = np.zeros((series_count, p+n))
+    for series_idx in range(series_count):
+        for i in range(p):
+            final_series[series_idx][i] = initial_values[series_idx][i]
+
+        for i in range(p, adj_n):
+            visible_series = final_series[series_idx][i - p:i]
+            final_series[series_idx][i] = errors[series_idx][i - p] + np.dot(coefs[series_idx][::-1], visible_series)
+
+    # Slice off initial values
+    return final_series[:, p:]
+    # return ar
+
 def generate_sar_phis(ar_phis, sar_phis, P, period):
     phis = np.zeros(max(len(ar_phis), P * period))
     phis[0:len(ar_phis)] = ar_phis
@@ -62,35 +95,27 @@ def generate_sar_phis(ar_phis, sar_phis, P, period):
 
     return phis
 
-def generate_multiple_series(num_series, length, p, P, period, seed, enforce_nonstationarity=True):
-    series = np.empty((num_series, length))
-    coefs = np.empty((num_series, max(p, P * period)))
-
+# Returns array of stationary coefs in a_1, a_2, ..., a_p order
+def generate_cluster_coefs(num_series, p, seed=333, enforce_stationarity=True):
     np.random.seed(seed)
 
+    all_coefs = np.empty((num_series, p))
+
     for x in range(num_series):
-        var = np.NAN
-        while np.isnan(var) or np.isinf(var) or var < MIN_VARIANCE:
-            ar_coefs = [(x - 0.5) * 2 for x in np.random.rand(p)]
-            sar_coefs = [(x - 0.5) * 2 for x in np.random.rand(P)]
+        coefs = np.array([(x - 0.5) * 2 for x in np.random.rand(p)])
+        char_polynomial = np.append(1, -1 * coefs)[::-1]
 
-            all_coefs = generate_sar_phis(ar_coefs, sar_coefs, P, period)
-            char_polynomial = np.append(1, -1 * all_coefs)[::-1]
+        if enforce_stationarity:
+            while np.min(np.abs(np.roots(char_polynomial))) < 1:
+                print(char_polynomial)
+                print("Resampling")
+                coefs = np.array([(x - 0.5) * 2 for x in np.random.rand(p)])
+                # [a1, a2] -> [-a2 -a1 1]
+                char_polynomial = np.append(1, -1 * coefs)[::-1]
 
-            if enforce_nonstationarity:
-                while np.max(np.abs(np.roots(char_polynomial))) < 1:
-                    ar_coefs = [(x - 0.5) * 2 for x in np.random.rand(p)]
-                    sar_coefs = [(x - 0.5) * 2 for x in np.random.rand(P)]
+        all_coefs[x] = coefs
 
-                    all_coefs = generate_sar_phis(ar_coefs, sar_coefs, P, period)
-                    char_polynomial = np.append(1, -1 * all_coefs)[::-1]
-
-            coefs[x] = all_coefs
-            series[x] = np.array([generate_ar(length, all_coefs, sigma=2)])
-
-            var = np.var(series[x])
-
-    return series, coefs
+    return all_coefs
 
 def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, num_windows, experiment_dir, forecast_window_dirs,
                    cluster_hierarchy=False, cluster_size=5):
@@ -210,23 +235,37 @@ def fit_ar_models(generated_series, start_idx, end_idx, lags):
     coefs_and_biases = dict()
 
     for series_idx in range(len(generated_series)):
-        estimated_ar_coefs, bias = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], start_idx, end_idx,
-                                                              lags)
+        print("Fitting " + str(series_idx))
+        m = SARIMAX(generated_series[series_idx][start_idx:end_idx], trend='c', order=(2, 0, 0))
+        r = m.fit(disp=False, return_params=True)
+        estimated_ar_coefs = r[1:-1]
+
+        #ols_coefs, ols_bias = estimate_AR_coefs.fit_AR_model(generated_series[series_idx], start_idx, end_idx, [1, 2])
+
+        bias = r[0]
+
+        #print(str(estimated_ar_coefs) + " " + str(bias))
+        #print(str(ols_coefs) + " " + str(ols_bias))
+
+
         coefs_and_biases[series_idx] = [estimated_ar_coefs, bias]
 
     return coefs_and_biases
 
 # Generate hierarchical time series PSL models and data files.
-def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, temporal_hierarchical_rule_weight=1.0, cluster_hierarchical_rule_weight=1.0, cluster_rules=False):
+def gen_hts_model(generated_series, coefs_and_biases, model_name, lags, temporal_hierarchical_rule_weight=1.0, cluster_hierarchical_rule_weight=1.0, temporal_rules=True, cluster_rules=False):
     if not os.path.exists(os.path.join(MODEL_PATH, str(model_name))):
         os.makedirs(os.path.join(MODEL_PATH, str(model_name)))
 
     # Generate model with hierarchical and AR rules
     hts_model_file = open(os.path.join(MODEL_PATH, str(model_name), "hts.psl"), "w")
-    hts_model_lines = "Series(S, +T) / |T| = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + str(temporal_hierarchical_rule_weight) + ": AggSeries(S, P) = OracleSeries(S, P) ^2\n\n"   
+    if temporal_rules:
+        hts_model_lines = "Series(S, +T) / |T| = AggSeries(S, P). {T: IsInWindow(T, P)}\n" + str(temporal_hierarchical_rule_weight) + ": AggSeries(S, P) = OracleSeries(S, P) ^2\n\n"
+    else:
+        hts_model_lines = "##\n\n"
 
     if cluster_rules:
-        hts_model_lines += "Series(+S, T) / |T| = ClusterMean(C, T). {S: SeriesCluster(S, C)} \n"
+        hts_model_lines += "Series(+S, T) / |S| = ClusterMean(C, T). {S: SeriesCluster(S, C)} \n"
         hts_model_lines += str(cluster_hierarchical_rule_weight) + ": ClusterMean(C, T) = ClusterOracle(C, T) ^2\n" 
 
     # Add AR rules
@@ -288,6 +327,7 @@ def normalize(series):
 
     return [(float(i)-min_element)/(max_element-min_element) for i in series]
 
+
 def set_up_experiment(p, P, period, add_noise, base_noise_scale, cluster_noise_scale, oracle_noise_scale, experiment_data_dir, experiment_model_name,
                       temporal_hierarchy_rule_weight=100.0,
                       cluster_hierarchy_rule_weight=100.0,
@@ -301,7 +341,7 @@ def set_up_experiment(p, P, period, add_noise, base_noise_scale, cluster_noise_s
     # Generate random AR data
     np.random.seed(SEED)
     generated_series, true_coefs = generate_multiple_series(NUM_SERIES_GENERATED, SERIES_LENGTH, p, P, period,
-                                                            seed=SEED, enforce_nonstationarity=False)
+                                                            seed=SEED, enforce_stationarity=True)
 
     # Filter out series that aren't between the two thresholds.
     filtered_generated_series = []
@@ -338,6 +378,8 @@ def set_up_experiment(p, P, period, add_noise, base_noise_scale, cluster_noise_s
                       cluster_rules=True)
     else:
         gen_hts_model(generated_series, coefs_and_biases, experiment_model_name, lags, temporal_hierarchical_rule_weight=100.0)
+        gen_hts_model(generated_series, coefs_and_biases, experiment_model_name + "_joint", lags,
+                      temporal_hierarchical_rule_weight=100.0)
 
     # Set up first experiment
     experiment_dir = os.path.join(DATA_PATH, experiment_data_dir, "eval")
@@ -351,16 +393,66 @@ def set_up_experiment(p, P, period, add_noise, base_noise_scale, cluster_noise_s
                          "\nOracle_series_noise_scale\t" + str(oracle_noise_scale) + "\nCluster_size\t" + str(cluster_size) + "\n"
     options_file_handle.write(options_file_lines)
 
+
+def generate_dataset(series_count, cluster_size, p, n, means, e_cov_matrix, seed=1234):
+    coefs = generate_cluster_coefs(cluster_size, p)
+    series_list = generate_ar_cluster(cluster_size, n, coefs, means, e_cov_matrix, seed)
+
+    while series_list.shape[0] < series_count:
+        seed += 1
+
+        coefs = generate_cluster_coefs(cluster_size, p)
+        series_list = np.append(series_list, generate_ar_cluster(cluster_size, n, coefs, means, e_cov_matrix, seed), axis=0)
+
+    return series_list
+
 def main():
-    # Common parameters across experiments
+    series_count = 8
+    cluster_size = 4
+
+    n = 1000
     p = 2
+    cross_cov = 0.5
+
+    np.set_printoptions(precision=6, suppress=True)
+
+    # Experiment 1 setup, cross-series correlated noise terms in k otherwise independent AR series
+    means = np.zeros(cluster_size)
+    e_cov_matrix = np.full((cluster_size, cluster_size), cross_cov)
+    np.fill_diagonal(e_cov_matrix, 1)
+
+    data = generate_dataset(series_count, cluster_size, p, n, means, e_cov_matrix)
+    for series in data:
+        print(acf(series, nlags=2))
+
+    exit(1)
+    """
+    sl = generate_multiple_series(4, 1000, 2, 0, 0, seed=3, enforce_stationarity=True)
+    s = np.reshape(np.sum(sl[0], axis=0), (1, 1000))
+    s += np.random.normal(0, 1, len(s))
+    endog = np.concatenate((s/4, sl[0]))
+
+    v = VARMAX(endog, order=(2,0), cov_type="robust_approx")
+    r = v.fit()
+    print(r.summary())
+    exit(1)
+    """
+    #s = generate_ar(20000, [0.3, -0.5])
+    #m = SARIMAX(s, trend='c', order=(2,0,0))
+    #r = m.fit(disp=False, return_params=True)
+    #print(r)
+    #print(m.param_names)
+    #exit(1)
+
+    # Common parameters across experiments
+    p = 3
     P = 0
 
     # Seasonal period - doesn't get used unless P > 0
     period = 10
 
     # Refers to adding noise after initial AR data generation.
-    add_noise = True
+    add_noise = False
 
     # Experiment 1: Vary noise added to base-level series.
     E1_base_noise_scales = [0.25, 0.5, 0.75, 1.0, 1.25]
@@ -370,13 +462,30 @@ def main():
     experiment_data_dir = "E1_base_noise"
     experiment_model_name = "E1_base_noise"
 
+    """
     for base_noise_scale in E1_base_noise_scales:
         set_up_experiment(p, P, period, add_noise, base_noise_scale, E1_cluster_noise_scale, E1_oracle_noise_scale,
                           experiment_data_dir + "_" + str(round(base_noise_scale, 3)),
                           experiment_model_name + "_" + str(round(base_noise_scale, 3)),
                           temporal_hierarchy_rule_weight=100.0,
                           cluster_hierarchy_rule_weight=100.0,
-                          cluster_hierarchy=True, cluster_size=5)
+                          cluster_hierarchy=False, cluster_size=5)
+    """
+
+    E3_base_noise_scale = 0.5
+    E3_oracle_noise_scale = 0
+    E3_cluster_oracle_noise_scale = 0
+
+    experiment_data_dir = "E3_cluster_p3_6"
+    experiment_model_name = "E3_cluster_p3_6"
+
+    set_up_experiment(p, P, period, add_noise, E3_base_noise_scale, E3_cluster_oracle_noise_scale, E3_oracle_noise_scale,
+                      experiment_data_dir + "_" + str(round(E3_base_noise_scale, 3)),
+                      experiment_model_name + "_" + str(round(E3_base_noise_scale, 3)),
+                      temporal_hierarchy_rule_weight=0.0,
+                      cluster_hierarchy_rule_weight=100.0,
+                      cluster_hierarchy=True, cluster_size=5)
+    exit(1)
 
     E2_oracle_noise_scales = [0.25, 0.5, 0.75, 1.0, 1.25]
     E2_base_noise_scale = 0.5
