@@ -7,11 +7,12 @@ from sklearn.metrics import r2_score
 
 INFERRED_PREDICATE_FILE_NAME = "SERIES.txt"
 TRUTH_PREDICATE_FILE_NAME = "Series_truth.txt"
-AR_BASELINE_FILE_NAME = "NaiveBaseline_obs.txt"
+AR_BASELINE_FILE_NAME = "ARBaseline_obs.txt"
+CLUSTER_BASELINE_NAME = "ARBaselineNaiveTD_obs.txt"
 
 OUT_FILE_NAME = "ar_vs_psl_metrics.tsv"
 
-METRICS = ["MAE", "MedAE", "Corr", "R2"]
+METRICS = ["MAE", "MedAE", "MSE", "Corr", "R2"]
 
 def absolute_error(x, y):
     return abs(x - y)
@@ -40,6 +41,11 @@ def main():
     res_dir = sys.argv[2]
     out_file = sys.argv[3]
 
+    cluster_baseline = False
+    if "cluster" in sys.argv[4]:
+        cluster_baseline = True
+
+
     abs_error_psl = 0
     abs_error_ar = 0
 
@@ -47,7 +53,7 @@ def main():
 
     results_df = pd.DataFrame(columns=["Series_ID", "Forecast_Window", "Method", "MAE", "MedAE", "Corr", "R2"])
 
-    for i in range(19):
+    for i in range(30):
         fold_dir = str(i).zfill(3)
         if not os.path.isdir(os.path.join(res_dir, fold_dir)):
             continue
@@ -57,7 +63,12 @@ def main():
 
         truth_lines = open(os.path.join(truth_fold_dir, TRUTH_PREDICATE_FILE_NAME), "r").readlines()
         result_lines = open(os.path.join(result_fold_dir, INFERRED_PREDICATE_FILE_NAME), "r").readlines()
-        ar_baseline_lines = open(os.path.join(truth_fold_dir, AR_BASELINE_FILE_NAME), "r").readlines()
+
+        if cluster_baseline:
+            ar_baseline_lines = open(os.path.join(truth_fold_dir, CLUSTER_BASELINE_NAME), "r").readlines()
+        else:
+            ar_baseline_lines = open(os.path.join(truth_fold_dir, AR_BASELINE_FILE_NAME), "r").readlines()
+
 
         truth_dict = dict()
         result_dict = dict()
@@ -100,11 +111,14 @@ def main():
             abs_errors_psl = []
             abs_errors_ar = []
 
+            sq_errors_psl = []
+            sq_errors_ar = []
+
             truth_values = []
             predicted_values_psl = []
             predicted_values_ar = []
 
-            for timestep in truth_dict[series].keys():
+            for timestep in list(truth_dict[series].keys()):
                 truth_values += [truth_dict[series][timestep]]
                 predicted_values_psl += [result_dict[series][timestep]]
                 predicted_values_ar += [ar_baseline_dict[series][timestep]]
@@ -112,11 +126,11 @@ def main():
                 ts_abs_error_psl = absolute_error(truth_dict[series][timestep], result_dict[series][timestep])
                 ts_abs_error_ar = absolute_error(truth_dict[series][timestep], ar_baseline_dict[series][timestep])
 
-                abs_error_psl += ts_abs_error_psl
-                abs_error_ar += ts_abs_error_ar
-
                 abs_errors_psl += [ts_abs_error_psl]
                 abs_errors_ar += [ts_abs_error_ar]
+
+                sq_errors_psl += [ts_abs_error_psl ** 2]
+                sq_errors_ar += [ts_abs_error_ar ** 2]
 
                 abs_error_count += 1
 
@@ -130,11 +144,11 @@ def main():
             r2_ar = r2_score(truth_values, predicted_values_ar)
 
             results_df = pd.concat([results_df, pd.DataFrame({"Series_ID": series, "Forecast_Window": fold_dir, "Method": "PSL",
-                                                 "MAE": np.mean(abs_errors_psl), "MedAE": np.median(abs_errors_psl),
+                                                 "MAE": np.mean(abs_errors_psl), "MedAE": np.median(abs_errors_psl), "MSE": np.mean(sq_errors_psl),
                                                               "Corr": corr_psl, "R2": r2_psl}, index=[0])])
 
             results_df = pd.concat([results_df, pd.DataFrame({"Series_ID": series, "Forecast_Window": fold_dir, "Method": "AR",
-                                                 "MAE": np.mean(abs_errors_ar), "MedAE": np.median(abs_errors_ar),
+                                                 "MAE": np.mean(abs_errors_ar), "MedAE": np.median(abs_errors_ar), "MSE": np.mean(sq_errors_ar),
                                                               "Corr": corr_ar, "R2": r2_ar}, index=[0])])
 
     metric_cols = []

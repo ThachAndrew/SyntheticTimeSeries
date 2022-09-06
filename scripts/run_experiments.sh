@@ -7,10 +7,10 @@ readonly BASE_DIR="${THIS_DIR}/.."
 readonly MODELS_DIR="${BASE_DIR}/timeseries_models"
 readonly RESULTS_DIR="${BASE_DIR}/results"
 
-readonly TIMESERIES_MODELS='hierarchical_test_model'
+readonly TIMESERIES_MODELS='E1/clus_or_variance_1/cross_cov_0.25/cw_hard'
 
 readonly EXPERIMENTS='Online'
-readonly DATASETS='test_experiment_noise_ar3'
+readonly DATASETS='E1/clus_or_variance_1/cross_cov_0.25'
 
 declare -A MODEL_OPTIONS
 MODEL_OPTIONS[test_experiment]='-D sgd.learningrate=1.0 -D sgd.maxiterations=2000'
@@ -49,7 +49,7 @@ function run() {
              cd "${BASE_DIR}/cli"
 
              # Set the data split.
-             sed -i "s/hts\/eval\/[0-9]\+/${dataset}\/eval\/000/g" "hts-eval.data"
+             sed -i "s@hts/eval/[0-9]\+@${dataset}/eval/000@g" "hts-eval.data"
 
              ./run.sh $experiment $dataset ${experiment_options} > "${out_path}" 2> "${err_path}"
 
