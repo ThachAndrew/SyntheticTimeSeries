@@ -1,5 +1,7 @@
+import copy
+
 import numpy as np
-from ar_forecast import ar_forecast, top_down_adjust_ar_forecast, fp_adjust_ar_forecast
+from ar_forecast import ar_forecast, top_down_adjust_ar_forecast, fp_adjust_ar_forecast, cluster_ar_forecast_adjust
 
 # Timestep lag predicate, gives the n-lagged timestep pairs of timesteps in [start + n, end] inclusive
 def lag_n_predicate(n, start, end, out_path):
@@ -64,23 +66,67 @@ def cluster_mean_predicate(cluster_series_map, start_timestep, end_timestep, out
 
     out_file_handle.write(out_file_lines)
 
+def sim_agg_forecast(cluster_series, t, h, z, forecast_variance_scale):
+    agg_series = np.sum(cluster_series, axis=0)
+    agg_var = np.var(agg_series[:z])
+
+    sigma = forecast_variance_scale * agg_var
+
+    forecast_window_truth = agg_series[t:t+h]
+
+    # Clip into a range where agg forecast values divided by the number of series aggregated is <= 1
+    forecast = [np.clip(agg + np.random.normal(0, (i+1) * (sigma/h)), 0, len(cluster_series)) for i, agg in enumerate(forecast_window_truth)]
+
+    return forecast
+
+def bias_ar_forecast_cluster(base_forecasts, agg_series):
+    series_sum = np.sum(base_forecasts, axis=0)
+    cluster_series = copy.deepcopy(base_forecasts)
+
+    for timestep_idx, agg_forecast_val in enumerate(agg_series):
+        adj_term = (agg_forecast_val - series_sum[timestep_idx])/len(cluster_series)
+        for series_idx in range(len(cluster_series)):
+            cluster_series[series_idx][timestep_idx] += adj_term
+
+    return cluster_series
+
+
 # Cluster oracle predicate, contains the true aggregate series values with respect to each cluster.
 # Option to add noise.
 # Values are for timesteps in [start_index, end_index] inclusive.
-def cluster_oracle_predicate(series_list, cluster_series_map, noise_sigma, start_index, end_index, out_path):
+def cluster_oracle_predicate(series_list, cluster_series_map, noise_sigma, init_segment_size, start_index, end_index, window_size, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
 
-    for cluster_id in cluster_series_map:
-        agg_series = np.sum([series_list[idx][start_index:end_index+1] for idx in cluster_series_map[cluster_id]], axis=0)
-        agg_series = agg_series + np.random.normal(scale=noise_sigma * np.std(agg_series), size=len(agg_series))
+    forecasts = np.empty((len(cluster_series_map.keys()), window_size * int((end_index - start_index + 1)/window_size)))
 
-        for t in range(len(agg_series)):
-            out_file_lines += str(cluster_id) + "\t" + str(t + start_index) + "\t" + str(agg_series[t] / len(cluster_series_map[cluster_id])) + "\n"
+    for cluster_id in cluster_series_map:
+        #agg_series = np.sum([series_list[idx][start_index:end_index+1] for idx in cluster_series_map[cluster_id]], axis=0)
+        #agg_series = agg_series + np.random.normal(scale=noise_sigma * np.std(agg_series), size=len(agg_series))
+
+        forecast_start = start_index
+
+        cluster_forecast = []
+
+        # TODO: return forecasts for use in baseline
+        while forecast_start < end_index:
+            forecast = sim_agg_forecast(np.array([series_list[idx] for idx in cluster_series_map[cluster_id]]), forecast_start, window_size, init_segment_size, noise_sigma)
+
+            for i in range(len(forecast)):
+                out_file_lines += str(cluster_id) + "\t" + str(forecast_start + i) + "\t" + str(forecast[i] / len(cluster_series_map[cluster_id])) + "\n"
+
+            cluster_forecast += forecast
+            forecast_start += window_size
+
+        forecasts[cluster_id] = np.array(cluster_forecast)
 
     out_file_handle.write(out_file_lines)
 
-def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_series_list, start_index, end_index, n, out_path, adj_out_path):
+    return forecasts
+
+
+def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_series_list,
+                            start_index, end_index, n, out_path, adj_out_path):
     out_file_handle = open(out_path, "w")
     adj_out_file_handle = open(adj_out_path, "w")
     out_file_lines = ""
@@ -107,7 +153,31 @@ def ar_baseline_predicate(series_list, coefs_and_biases, series_ids, oracle_seri
 
     return base_ar_forecasts
 
-def fp_ar_baseline_predicate(base_forecast_series_list, cluster_series_map, cluster_agg_series_list, start, end, out_path):
+def cluster_equal_bias_ar_forecasts_predicate(series_list, coefs_and_biases, cluster_oracle_series_list, cluster_size, start_idx, end_idx, init_size, n, out_path):
+    out_file_handle = open(out_path, "w")
+    out_file_lines = ""
+
+    n_clusters = int(len(series_list) / cluster_size)
+
+    for cluster_idx in range(n_clusters):
+        base_forecasts = [[] for x in range(cluster_size)]
+
+        for series_cluster_idx in range(cluster_size):
+            series_idx = (cluster_idx * cluster_size) + series_cluster_idx
+
+            coefs, bias = coefs_and_biases[series_idx]
+            forecast = np.clip(ar_forecast(series_list[series_idx][start_idx:end_idx + 1], coefs, bias, n), 0, 1)
+            base_forecasts[series_cluster_idx] = forecast
+
+        coherent_forecasts = bias_ar_forecast_cluster(base_forecasts, cluster_oracle_series_list[cluster_idx][end_idx - init_size + 1:end_idx - init_size + n + 1])
+
+        for time_step_idx in range(n):
+            for series_cluster_idx in range(cluster_size):
+                out_file_lines += str((cluster_idx * cluster_size) + series_cluster_idx) + "\t" + str(end_idx + time_step_idx + 1) + "\t" + str(coherent_forecasts[series_cluster_idx][time_step_idx]) + "\n"
+
+    out_file_handle.write(out_file_lines)
+
+def fp_ar_baseline_predicate(base_forecast_series_list, cluster_series_map, cluster_agg_series_list, cluster_size, init_size, start, end, out_path):
     out_file_handle = open(out_path, "w")
     out_file_lines = ""
 
@@ -115,15 +185,13 @@ def fp_ar_baseline_predicate(base_forecast_series_list, cluster_series_map, clus
         base_forecasts = [base_forecast_series_list[series_id] for series_id in cluster_series_map[cluster_id]]
         agg_series = cluster_agg_series_list[cluster_id]
 
-        coherent_forecasts = fp_adjust_ar_forecast(base_forecasts, agg_series[start:end + 1])
+        coherent_forecasts = fp_adjust_ar_forecast(base_forecasts, agg_series[start - init_size:end + 1 - init_size])
 
         for series_idx in range(len(cluster_series_map[cluster_id])):
             for timestep in range(start, end + 1):
                 out_file_lines += str(cluster_series_map[cluster_id][series_idx]) + "\t" + str(timestep) + "\t" + str(coherent_forecasts[series_idx][timestep - start]) + "\n"
 
     out_file_handle.write(out_file_lines)
-
-
 
 # Series blocking for the AR arithmetic rules.
 def series_block_predicate(series_ids, out_path):
@@ -203,6 +271,19 @@ def generate_aggregate_series(series, start_index, end_index, window_size):
         agg_series = np.append(agg_series, window_mean)
 
     return agg_series
+
+#  Series mean predicate for mean prior
+def series_mean_predicate(series_list, series_ids, end_time_step, out_path):
+    out_file_lines = ""
+    out_file_handle = open(out_path, "w")
+
+    for idx, series in enumerate(series_list):
+        trunc_series = series[:end_time_step]
+
+        out_file_lines += str(series_ids[idx]) + "\t" + str(np.mean(trunc_series)) + "\n"
+
+    out_file_handle.write(out_file_lines)
+
 
 # Oracle series predicate. Equivalent to the true aggregate series value but optionally has noise added to it.
 def oracle_series_predicate(series_list, series_ids, start_index, end_index, noise_sigma, out_path):
