@@ -7,6 +7,12 @@ def ar_forecast(x, coefs, bias, n):
 
     return x[-n:]
 
+def cluster_ar_forecast_adjust(forecasts, sum):
+    base_forecast_sum = np.sum(forecasts)
+    adj_term = (sum - base_forecast_sum)/len(forecasts)
+
+    return [forecast + adj_term for forecast in forecasts]
+
 # Bias AR forecasts so their mean is equal to some specified value
 def top_down_adjust_ar_forecast(forecast, mean):
     forecast_mean = np.mean(forecast)
@@ -23,5 +29,8 @@ def fp_adjust_ar_forecast(series, agg_series):
 
         for s in range(len(series)):
             coherent_forecasts[s] += [agg_series[t] * (series[s][t] / series_sum)]
+
+    print(agg_series)
+    print(coherent_forecasts)
 
     return coherent_forecasts

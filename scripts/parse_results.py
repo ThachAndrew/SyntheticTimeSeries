@@ -7,12 +7,12 @@ from sklearn.metrics import r2_score
 
 INFERRED_PREDICATE_FILE_NAME = "SERIES.txt"
 TRUTH_PREDICATE_FILE_NAME = "Series_truth.txt"
-AR_BASELINE_FILE_NAME = "ARBaseline_obs.txt"
+AR_BASELINE_FILE_NAME = "ARBaselineAdj_obs.txt"
 CLUSTER_BASELINE_NAME = "ARBaselineNaiveTD_obs.txt"
 
 OUT_FILE_NAME = "ar_vs_psl_metrics.tsv"
 
-METRICS = ["MAE", "MedAE", "MSE", "Corr", "R2", "SMAPE", "MASE"]
+METRICS = ["MAE", "MedAE", "MSE", "SMAPE", "MASE"]
 
 def absolute_error(x, y):
     return abs(x - y)
@@ -70,7 +70,7 @@ def main():
 
     results_df = pd.DataFrame(columns=["Series_ID", "Forecast_Window", "Method", "MAE", "MedAE", "Corr", "R2"])
 
-    for i in range(15):
+    for i in range(18):
         fold_dir = str(i).zfill(3)
         if not os.path.isdir(os.path.join(res_dir, fold_dir)):
             continue

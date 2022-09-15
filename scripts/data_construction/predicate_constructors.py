@@ -13,6 +13,21 @@ def lag_n_predicate(n, start, end, out_path):
 
     out_file_handle.write(out_file_lines)
 
+def lags_predicate(lags, start, end, out_path):
+    out_file_handle = open(out_path, "w")
+    out_file_lines = ""
+
+    for time_step in range(start + len(lags), end + 1):
+        out_file_lines += str(time_step)
+
+        for lag in lags:
+            out_file_lines += "\t" + str(time_step - lag)
+
+        out_file_lines += "\n"
+
+    out_file_handle.write(out_file_lines)
+
+
 # Write series observations (or omit the values to get targets) in range [start_index, end_index] inclusive
 def series_predicate(series_list, series_ids, start_index, end_index, out_path, include_values=True):
     out_file_handle = open(out_path, "w")
@@ -70,12 +85,12 @@ def sim_agg_forecast(cluster_series, t, h, z, forecast_variance_scale):
     agg_series = np.sum(cluster_series, axis=0)
     agg_var = np.var(agg_series[:z])
 
-    sigma = forecast_variance_scale * agg_var
+    sigma_sq = forecast_variance_scale * agg_var
 
     forecast_window_truth = agg_series[t:t+h]
 
     # Clip into a range where agg forecast values divided by the number of series aggregated is <= 1
-    forecast = [np.clip(agg + np.random.normal(0, (i+1) * (sigma/h)), 0, len(cluster_series)) for i, agg in enumerate(forecast_window_truth)]
+    forecast = [np.clip(agg + np.random.normal(0, sigma_sq), 0, len(cluster_series)) for i, agg in enumerate(forecast_window_truth)]
 
     return forecast
 

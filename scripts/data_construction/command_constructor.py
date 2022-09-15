@@ -72,3 +72,31 @@ def create_forecast_window_commands(all_series, series_ids, cluster_ids, start, 
     command_lines += "Exit\n"
 
     return command_lines
+
+def iterative_forecast_commands(all_series, series_ids, cluster_ids, start, end, window_size, forecast_window_idx, agg_window_idx):
+    command_lines = ""
+
+    for idx, series in enumerate(all_series):
+        command_lines += create_command_line(ADD, TARGET, "AggSeries", [series_ids[idx], agg_window_idx],
+                                             None) + "\n"
+
+        if forecast_window_idx > 0:
+            for timestep in range(start - window_size, start):
+                command_lines += create_command_line(OBSERVE, OBS, "Series", [series_ids[idx], timestep],
+                                                     series[timestep]) + "\n"
+
+    for timestep in range(start, end + 1):
+        for cluster_idx in range(len(cluster_ids)):
+            command_lines += create_command_line(ADD, TARGET, "ClusterMean", [cluster_ids[cluster_idx], timestep],
+                                             None) + "\n"
+        for idx, series in enumerate(all_series):
+            command_lines += create_command_line(ADD, TARGET, "Series", [series_ids[idx], timestep], None) + "\n"
+
+        command_lines += WRITE_INFERRED_COMMAND + "\t'inferred-predicates/{:03d}/{:02d}'".format(forecast_window_idx, timestep - start) + "\n"
+
+        for idx, series in enumerate(all_series):
+            command_lines += create_command_line(FIX, OBS, "Series", [series_ids[idx], timestep], None) + "\n"
+
+    command_lines += "Exit\n"
+
+    return command_lines
