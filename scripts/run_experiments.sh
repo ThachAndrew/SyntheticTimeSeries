@@ -7,16 +7,44 @@ readonly BASE_DIR="${THIS_DIR}/.."
 readonly MODELS_DIR="${BASE_DIR}/timeseries_models"
 readonly RESULTS_DIR="${BASE_DIR}/results"
 
-readonly TIMESERIES_MODELS='E1/clus_or_variance_1/cross_cov_0.25/cw_hard'
+readonly TIMESERIES_MODELS='E1_p4/clus_or_variance_1/cross_cov_0/cw_hard_meanprior0.1_nsq'
 
 readonly EXPERIMENTS='Online'
-readonly DATASETS='E1/clus_or_variance_1/cross_cov_0.25'
+readonly DATASETS='E1_p4/clus_or_variance_1/cross_cov_0'
 
 declare -A MODEL_OPTIONS
 MODEL_OPTIONS[test_experiment]='-D sgd.learningrate=1.0 -D sgd.maxiterations=2000'
 
-readonly INFERENCE_OPTIONS='-D sgd.extension=ADAM -D sgd.inversescaleexp=1.5 -D inference.initialvalue=ATOM -D partialgrounding.powerset=true -D reasoner.tolerance=1e-8f'
+readonly INFERENCE_OPTIONS='-D sgd.extension=ADAM -D sgd.inversescaleexp=1.5 -D inference.initialvalue=ATOM -D partialgrounding.powerset=true -D reasoner.tolerance=1e-9f'
 readonly STANDARD_OPTIONS=''
+
+#todo@alex: iterate over dataset - model pairs
+# E1: Vary cluster oracle noise over n \in [0, 0.25, 0.5, 0.75, 1]
+# p=4, h \in {4, 12}
+# cluster_size = 6
+# num_series = 120
+# PSL rules:
+#   no temporal rule
+#   hard cluster rules,
+#   all autoregressive rules
+#   non-squared mean prior (weight 0.1)
+# PSL model name E1_p4/clus_or_variance_[n]/cross_cov_0/cw_hard_meanprior0.1
+#
+# Baselines:
+# Compare to naive top-down (oracle aggregates on top layer) AR baseline that equally biases all predictions in a cluster to sum to the given aggregate value
+
+# E2: Just rules that enforce summing to the temporal oracle, varying its added noise over [0, 0.25, 0.5, 0.75, 1]
+# p=4, h \in {4, 12}
+# PSL Rules:
+#   hard temporal constraint
+#   no cluster rules
+#   all autoregressive rules
+#   non-squared mean prior (weight 0.1)
+# PSL model name E1_p4/clus_or_variance_0/cross_cov_0/
+#
+# Baseline:
+# Compare to naive top-down-like AR baseline that equally biases all forecasted values to sum to a temporal aggregate given by the oracle.
+
 
 function run() {
   local model_name=$1
