@@ -30,7 +30,4 @@ def fp_adjust_ar_forecast(series, agg_series):
         for s in range(len(series)):
             coherent_forecasts[s] += [agg_series[t] * (series[s][t] / series_sum)]
 
-    print(agg_series)
-    print(coherent_forecasts)
-
     return coherent_forecasts
