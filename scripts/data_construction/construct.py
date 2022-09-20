@@ -1,3 +1,5 @@
+import copy
+
 import command_constructor
 import predicate_constructors
 import estimate_AR_coefs
@@ -18,6 +20,7 @@ import os
 DATA_PATH = "data"
 MODEL_PATH = "timeseries_models"
 EXPERIMENT_NAME = "test_experiment_t"
+DISCARDED_SEGMENT_LENGTH = 500
 """
 NUM_SERIES_GENERATED = 250
 VARIANCE_LOWER_PERCENTILE = 40
@@ -58,23 +61,23 @@ def generate_ar(n, phis, sigma=1):
 # (Optional scale for initializing values)
 def generate_ar_cluster(series_count, n, coefs, means, e_cov, seed, init_value_scale=1):
     p = coefs.shape[1]
-    adj_n = n + p
+    adj_n = n + p + DISCARDED_SEGMENT_LENGTH
 
     np.random.seed(seed)
     errors = np.random.multivariate_normal(means, e_cov, n).T
     initial_values = np.random.normal(0, init_value_scale, (series_count, p))
 
-    final_series = np.zeros((series_count, p+n))
+    final_series = np.zeros((series_count, adj_n))
     for series_idx in range(series_count):
         for i in range(p):
             final_series[series_idx][i] = initial_values[series_idx][i]
 
         for i in range(p, adj_n):
             visible_series = final_series[series_idx][i - p:i]
-            final_series[series_idx][i] = errors[series_idx][i - p] + np.dot(coefs[series_idx][::-1], visible_series)
+            final_series[series_idx][i] = errors[series_idx][i - p - DISCARDED_SEGMENT_LENGTH] + np.dot(coefs[series_idx][::-1], visible_series)
 
     # Slice off initial values
-    return final_series[:, p:]
+    return final_series[:, DISCARDED_SEGMENT_LENGTH + p:]
     # return ar
 
 def generate_sar_phis(ar_phis, sar_phis, P, period):
@@ -113,7 +116,7 @@ def generate_cluster_coefs(num_series, p, window_size, seed=333, enforce_station
 
     return all_coefs
 
-def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, num_windows, experiment_dir, forecast_window_dirs, window_size,
+def build_psl_data(generated_series, noisy_series, coefs_and_biases, cluster_oracle_noise_sigma, oracle_noise_sigma, lags, num_windows, experiment_dir, forecast_window_dirs, window_size,
                    initial_segment_size, series_length, cluster_hierarchy=True, cluster_size=5, batch=True):
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
@@ -147,11 +150,11 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
                                                               os.path.join(initial_window_dir,
                                                                            "IsInWindow_obs.txt"))
 
-    predicate_constructors.series_mean_predicate(generated_series, series_ids, initial_segment_size, os.path.join(initial_window_dir, "SeriesMean_obs.txt"))
+    predicate_constructors.series_mean_predicate(noisy_series, series_ids, initial_segment_size, os.path.join(initial_window_dir, "SeriesMean_obs.txt"))
 
     # Series predicate
     # Initial segment series values
-    predicate_constructors.series_predicate(generated_series, series_ids, initial_segment_size - (window_size + 1), initial_segment_size - 1,
+    predicate_constructors.series_predicate(noisy_series, series_ids, initial_segment_size - (window_size + 1), initial_segment_size - 1,
                                             os.path.join(initial_window_dir, "Series_obs.txt"),
                                             include_values=True)
 
@@ -182,18 +185,21 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
                                                    os.path.join(initial_window_dir, "OracleSeries_obs.txt"))
 
     # Naive prediction predicate (WIP, need to make it based on historical means)
-    predicate_constructors.naive_prediction_predicate(agg_series, series_ids, int(initial_segment_size / window_size), int(initial_segment_size / window_size) + 1, window_size, os.path.join(initial_window_dir, "NaiveBaseline_obs.txt"))
+    # predicate_constructors.naive_prediction_predicate(agg_series, series_ids, int(initial_segment_size / window_size), int(initial_segment_size / window_size) + 1, window_size, os.path.join(initial_window_dir, "NaiveBaseline_obs.txt"))
 
     # AR Baseline; not used in model, but used for evaluation.
     # ARBaseline and ARBaselineAdj predicates.
-    base_forecast_series_list = predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((initial_segment_size + window_size)/window_size - 1)] for series in agg_series], 0, initial_segment_size - 1, window_size,
+    base_forecast_series_list = predicate_constructors.ar_baseline_predicate(noisy_series, coefs_and_biases, series_ids, [series[int((initial_segment_size + window_size)/window_size - 1)] for series in agg_series], 0, initial_segment_size - 1, window_size,
                                                  os.path.join(initial_window_dir,  "ARBaseline_obs.txt"), os.path.join(initial_window_dir,  "ARBaselineAdj_obs.txt"))
 
-    predicate_constructors.cluster_equal_bias_ar_forecasts_predicate(generated_series, coefs_and_biases, cluster_forecasts, cluster_size,
+    predicate_constructors.cluster_equal_bias_ar_forecasts_predicate(noisy_series, coefs_and_biases, cluster_forecasts, cluster_size,
                                               0, initial_segment_size - 1, initial_segment_size, window_size, os.path.join(initial_window_dir, "ARBaselineNaiveTD_obs.txt"))
     if cluster_hierarchy:
         #predicate_constructors.cluster_ar_baseline_predicate(generated_series, coefs_and_biases, cluster_agg_series_list, initial_segment_size, window_size, cluster_size, os.path.join(initial_window_dir,  "ARBaselinec_obs.txt"))
         #exit(1)
+
+        # TODO@Alex: re-implement top-down FP
+
         predicate_constructors.fp_ar_baseline_predicate(base_forecast_series_list, cluster_series_map, cluster_forecasts, cluster_size, initial_segment_size, initial_segment_size, initial_segment_size + window_size - 1,
                              os.path.join(initial_window_dir, "ARBaselineFP_obs.txt"))
 
@@ -204,7 +210,7 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
     # First forecast window commands.
     if batch:
         open(os.path.join(initial_window_dir, "commands.txt"), "w").write(
-            command_constructor.create_forecast_window_commands(generated_series, series_ids, cluster_ids, initial_segment_size,
+            command_constructor.create_forecast_window_commands(generated_series, noisy_series, series_ids, cluster_ids, initial_segment_size,
                                                                 initial_segment_size + window_size - 1, window_size, 0, int(np.rint(initial_segment_size / window_size)),
                                                                 cluster=cluster_hierarchy))
     else:
@@ -249,7 +255,7 @@ def build_psl_data(generated_series, coefs_and_biases, cluster_oracle_noise_sigm
                                                                                       "ARBaselineNaiveTD_obs.txt"))
         if batch:
             open(os.path.join(forecast_window_dir, "commands.txt"), "w").write(
-                command_constructor.create_forecast_window_commands(generated_series, series_ids, cluster_ids, start_time_step, end_time_step, window_size, window_idx,
+                command_constructor.create_forecast_window_commands(generated_series, noisy_series, series_ids, cluster_ids, start_time_step, end_time_step, window_size, window_idx,
                                                                     int(np.rint(initial_segment_size / window_size)) + window_idx, cluster=cluster_hierarchy))
         else:
             open(os.path.join(forecast_window_dir, "commands.txt"), "w").write(
@@ -388,31 +394,40 @@ def normalize_multiple(series_list):
 
     return normalized_series_list
 
-def set_up_experiment(exp_name, series_count, p, cluster_size, err_means, err_cov_matrix, forecast_variance_scale, init_segment_size, num_windows, experiment_name_dir, temp_oracle_variance, window_size, initial_segment_size, series_length, batch=False):
+def set_up_experiment(exp_name, series_count, p, cluster_size, post_noise_var, err_means, err_cov_matrix, forecast_variance_scale, init_segment_size, num_windows, experiment_name_dir, temp_oracle_variance, window_size, initial_segment_size, series_length, batch=False):
     lags = [l + 1 for l in np.arange(p)]
-    generated_series, coefs = generate_dataset(series_count, cluster_size, p, init_segment_size + (num_windows*window_size), err_means, err_cov_matrix, window_size, seed=1234)
+    generated_series, coefs = generate_dataset(series_count, cluster_size, p, init_segment_size + (num_windows*window_size) + DISCARDED_SEGMENT_LENGTH, err_means, err_cov_matrix, window_size, seed=1234)
 
     # All off-diagonal elements (cross-series covariances) are equal
     cross_cov = err_cov_matrix[0][1]
 
+    noisy_series = copy.deepcopy(generated_series)
+
+    for series_idx in range(series_count):
+        noisy_series[series_idx] = noisy_series[series_idx] + np.random.normal(0, post_noise_var, noisy_series.shape[1])
+
     for cluster_idx in range(int(series_count / cluster_size)):
-        generated_series[cluster_idx * cluster_size:(cluster_idx + 1) * cluster_size] = normalize_multiple(generated_series[cluster_idx * cluster_size:(cluster_idx + 1) * cluster_size])
+        noisy_and_original_series = np.concatenate(((generated_series[cluster_idx * cluster_size:(cluster_idx + 1) * cluster_size]), (noisy_series[cluster_idx * cluster_size:(cluster_idx + 1) * cluster_size])), axis=0)
+        noisy_and_original_series_norm = normalize_multiple(noisy_and_original_series)
+
+        generated_series[cluster_idx * cluster_size:(cluster_idx + 1) * cluster_size] = noisy_and_original_series_norm[:cluster_size]
+        noisy_series[cluster_idx * cluster_size:(cluster_idx + 1) * cluster_size] = noisy_and_original_series_norm[cluster_size:]
 
     mase_scale_factor_lines = ""
 
     for idx, series in enumerate(generated_series):
-        mase_scale_factor_lines += str(idx) + "\t" + str(np.abs(  np.diff( series[:1000]) ).sum()/(1000 - 1)) + "\n"
+        mase_scale_factor_lines += str(idx) + "\t" + str(np.abs(np.diff( series[:initial_segment_size])).sum()/(initial_segment_size - 1)) + "\n"
 
     open("mase_scale.txt", "w").write(mase_scale_factor_lines)
 
-    coefs_and_biases = fit_ar_models(generated_series, 0, initial_segment_size-1, p)
+    coefs_and_biases = fit_ar_models(noisy_series, 0, initial_segment_size-1, p)
 
     #print(coefs_and_biases)
 
     experiment_dir = os.path.join(DATA_PATH, experiment_name_dir, "eval")
     forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(num_windows)]
 
-    build_psl_data(generated_series, coefs_and_biases, forecast_variance_scale, temp_oracle_variance, lags,
+    build_psl_data(generated_series, noisy_series, coefs_and_biases, forecast_variance_scale, temp_oracle_variance, lags,
                    num_windows, experiment_dir, forecast_window_dirs, window_size, initial_segment_size, series_length,
                    cluster_hierarchy=True, cluster_size=cluster_size, batch=batch)
 
@@ -553,38 +568,45 @@ def generate_dataset(series_count, cluster_size, p, n, means, e_cov_matrix, wind
 
 def main():
     series_count = 120
-    cluster_size = 6
+    cluster_size = 4
 
     p = 4
 
+
+    post_noise_vars = [0, 0.5, 1]
     cross_covs = [0]
-    forecast_variance_scales = [0, 0.25, 0.5, 0.75, 1.0]
+    forecast_variance_scales = [1]
     temp_or_variances = [0]
-    forecast_window_sizes = [p, 3 * p]
+    forecast_window_sizes = [p]
     initial_segment_size = 1000
 
     num_forecast_windows = 30
 
-    exp_name = "E1_p" + str(p)
+    #exp_name = "E1_p" + str(p)
+    exp_name = "E1"
 
-    #data, coefs = generate_dataset(series_count, cluster_size, p, n, err_means, err_cov_matrix, seed=4444)
+    exp1_dirs = ""
 
     for forecast_variance_scale in forecast_variance_scales:
         for cross_cov in cross_covs:
             for temp_or_variance in temp_or_variances:
                 for forecast_window_size in forecast_window_sizes:
-                    err_means = np.zeros(cluster_size)
-                    err_cov_matrix = np.full((cluster_size, cluster_size), cross_cov)
-                    np.fill_diagonal(err_cov_matrix, 1)
+                        for post_noise_var in post_noise_vars:
+                            err_means = np.zeros(cluster_size)
+                            err_cov_matrix = np.full((cluster_size, cluster_size), cross_cov)
+                            np.fill_diagonal(err_cov_matrix, 1)
 
-                    initial_segment_size = 1000
-                    initial_segment_size += (forecast_window_size - (initial_segment_size % forecast_window_size))
+                            initial_segment_size = 1000
+                            initial_segment_size += (forecast_window_size - (initial_segment_size % forecast_window_size))
 
-                    series_length = initial_segment_size + (num_forecast_windows) * forecast_window_size
+                            series_length = initial_segment_size + (num_forecast_windows) * forecast_window_size
 
-                    exp_dir = os.path.join(exp_name, "clus_or_variance_" + str(forecast_variance_scale), "cross_cov_" + str(cross_cov), "temp_or_variance_" + str(temp_or_variance), "window_size_" + str(forecast_window_size))
-                    set_up_experiment(exp_name, series_count, p, cluster_size, err_means, err_cov_matrix, forecast_variance_scale,
-                              initial_segment_size, num_forecast_windows, exp_dir, temp_or_variance, forecast_window_size, initial_segment_size, series_length, batch=True)
+                            exp_dir = os.path.join(exp_name, "base_noise_" + str(post_noise_var), "clus_or_variance_" + str(forecast_variance_scale), "cross_cov_" + str(cross_cov), "temp_or_variance_" + str(temp_or_variance), "window_size_" + str(forecast_window_size))
+                            exp1_dirs += exp_dir + " "
+                            set_up_experiment(exp_name, series_count, p, cluster_size, post_noise_var, err_means, err_cov_matrix, forecast_variance_scale,
+                                      initial_segment_size, num_forecast_windows, exp_dir, temp_or_variance, forecast_window_size, initial_segment_size, series_length, batch=True)
+
+    exit(1)
 
 
     p = 4
