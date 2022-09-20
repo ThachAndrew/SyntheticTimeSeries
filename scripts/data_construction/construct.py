@@ -606,6 +606,7 @@ def main():
                             set_up_experiment(exp_name, series_count, p, cluster_size, post_noise_var, err_means, err_cov_matrix, forecast_variance_scale,
                                       initial_segment_size, num_forecast_windows, exp_dir, temp_or_variance, forecast_window_size, initial_segment_size, series_length, batch=True)
 
+    open(os.path.join(DATA_PATH, "e1_data_dirs.txt"), "w").write(exp1_dirs)
     exit(1)
 
 
