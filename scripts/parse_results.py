@@ -70,7 +70,7 @@ def main():
 
     results_df = pd.DataFrame(columns=["Series_ID", "Forecast_Window", "Method", "MAE", "MedAE", "Corr", "R2"])
 
-    for i in range(18):
+    for i in range(6):
         fold_dir = str(i).zfill(3)
         if not os.path.isdir(os.path.join(res_dir, fold_dir)):
             continue
