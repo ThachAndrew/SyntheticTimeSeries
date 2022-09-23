@@ -85,12 +85,12 @@ def sim_agg_forecast(cluster_series, t, h, z, forecast_variance_scale):
     agg_series = np.sum(cluster_series, axis=0)
     agg_var = np.var(agg_series[:z])
 
-    sigma_sq = forecast_variance_scale * agg_var
+    sigma = forecast_variance_scale * agg_var
 
     forecast_window_truth = agg_series[t:t+h]
 
     # Clip into a range where agg forecast values divided by the number of series aggregated is <= 1
-    forecast = [np.clip(agg + np.random.normal(0, sigma_sq), 0, len(cluster_series)) for i, agg in enumerate(forecast_window_truth)]
+    forecast = [np.clip(agg + np.random.normal(0, sigma), 0, len(cluster_series)) for i, agg in enumerate(forecast_window_truth)]
 
     return forecast
 

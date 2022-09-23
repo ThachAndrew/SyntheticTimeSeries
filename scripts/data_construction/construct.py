@@ -106,8 +106,6 @@ def generate_cluster_coefs(num_series, p, window_size, seed=333, enforce_station
 
         if enforce_stationarity:
             while np.min(np.abs(np.roots(char_polynomial))) < 1:
-                print(char_polynomial)
-                print("Resampling")
                 ar_coefs = np.array([(x - 0.5) * 2 for x in np.random.rand(p)])
                 # [a1, a2] -> [-a2 -a1 1]
                 char_polynomial = np.append(1, -1 * ar_coefs)[::-1]
@@ -241,13 +239,13 @@ def build_psl_data(generated_series, noisy_series, coefs_and_biases, cluster_ora
 
 
         # AR Baseline; not used in model, but used for evaluation.
-        predicate_constructors.ar_baseline_predicate(generated_series, coefs_and_biases, series_ids, [series[int((initial_segment_size + window_size)/window_size - 1 + window_idx)] for series in agg_series], 0, start_time_step - 1, window_size, os.path.join(forecast_window_dir, "ARBaseline_obs.txt"), os.path.join(forecast_window_dir, "ARBaselineAdj_obs.txt"))
+        predicate_constructors.ar_baseline_predicate(noisy_series, coefs_and_biases, series_ids, [series[int((initial_segment_size + window_size)/window_size - 1 + window_idx)] for series in agg_series], 0, start_time_step - 1, window_size, os.path.join(forecast_window_dir, "ARBaseline_obs.txt"), os.path.join(forecast_window_dir, "ARBaselineAdj_obs.txt"))
         predicate_constructors.fp_ar_baseline_predicate(base_forecast_series_list, cluster_series_map,
                                                         cluster_forecasts, cluster_size, initial_segment_size,
                                                         initial_segment_size + (window_idx * window_size), initial_segment_size + ((window_idx + 1) * window_size) - 1,
                                                         os.path.join(forecast_window_dir, "ARBaselineFP_obs.txt"))
 
-        predicate_constructors.cluster_equal_bias_ar_forecasts_predicate(generated_series, coefs_and_biases,
+        predicate_constructors.cluster_equal_bias_ar_forecasts_predicate(noisy_series, coefs_and_biases,
                                                                          cluster_forecasts, cluster_size,
                                                                          0, start_time_step - 1, initial_segment_size,
                                                                          window_size,
@@ -403,6 +401,8 @@ def set_up_experiment(exp_name, series_count, p, cluster_size, post_noise_var, e
 
     noisy_series = copy.deepcopy(generated_series)
 
+    np.random.seed(1234)
+
     for series_idx in range(series_count):
         noisy_series[series_idx] = noisy_series[series_idx] + np.random.normal(0, post_noise_var, noisy_series.shape[1])
 
@@ -413,19 +413,29 @@ def set_up_experiment(exp_name, series_count, p, cluster_size, post_noise_var, e
         generated_series[cluster_idx * cluster_size:(cluster_idx + 1) * cluster_size] = noisy_and_original_series_norm[:cluster_size]
         noisy_series[cluster_idx * cluster_size:(cluster_idx + 1) * cluster_size] = noisy_and_original_series_norm[cluster_size:]
 
+    experiment_dir = os.path.join(DATA_PATH, experiment_name_dir, "eval")
+    forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(num_windows)]
+
+    if not os.path.exists(experiment_dir):
+        os.makedirs(experiment_dir)
+
     mase_scale_factor_lines = ""
 
     for idx, series in enumerate(generated_series):
         mase_scale_factor_lines += str(idx) + "\t" + str(np.abs(np.diff( series[:initial_segment_size])).sum()/(initial_segment_size - 1)) + "\n"
 
-    open("mase_scale.txt", "w").write(mase_scale_factor_lines)
+    open(os.path.join(experiment_dir, "mase_scale.txt"), "w").write(mase_scale_factor_lines)
 
-    coefs_and_biases = fit_ar_models(noisy_series, 0, initial_segment_size-1, p)
+    stddevs_lines = ""
+
+    for idx, series in enumerate(generated_series):
+        stddevs_lines += str(idx) + "\t" + str(np.std(series)) + "\n"
+
+    open(os.path.join(experiment_dir, "stddevs.txt"), "w").write(stddevs_lines)
+
+    coefs_and_biases = fit_ar_models(generated_series, 250, initial_segment_size-1, p)
 
     #print(coefs_and_biases)
-
-    experiment_dir = os.path.join(DATA_PATH, experiment_name_dir, "eval")
-    forecast_window_dirs = [str(window_idx).zfill(3) for window_idx in range(num_windows)]
 
     build_psl_data(generated_series, noisy_series, coefs_and_biases, forecast_variance_scale, temp_oracle_variance, lags,
                    num_windows, experiment_dir, forecast_window_dirs, window_size, initial_segment_size, series_length,
@@ -567,23 +577,23 @@ def generate_dataset(series_count, cluster_size, p, n, means, e_cov_matrix, wind
 # forecast_variance_scale: constant multiplier to the true aggregate series variance used to define the scale of the noise added to the pseudo-forecast
 
 def main():
-    series_count = 120
+    series_count = 60
     cluster_size = 4
 
-    p = 4
+    p = 2
 
 
-    post_noise_vars = [0, 0.5, 1]
+    post_noise_stds = [1]
     cross_covs = [0]
-    forecast_variance_scales = [1]
+    forecast_variance_scales = [0.5, 1, 1.5, 2]
     temp_or_variances = [0]
-    forecast_window_sizes = [p]
+    forecast_window_sizes = [4]
     initial_segment_size = 1000
 
     num_forecast_windows = 30
 
     #exp_name = "E1_p" + str(p)
-    exp_name = "E1"
+    exp_name = "E1_fixednoise"
 
     exp1_dirs = ""
 
@@ -591,7 +601,7 @@ def main():
         for cross_cov in cross_covs:
             for temp_or_variance in temp_or_variances:
                 for forecast_window_size in forecast_window_sizes:
-                        for post_noise_var in post_noise_vars:
+                        for post_noise_var in post_noise_stds:
                             err_means = np.zeros(cluster_size)
                             err_cov_matrix = np.full((cluster_size, cluster_size), cross_cov)
                             np.fill_diagonal(err_cov_matrix, 1)
