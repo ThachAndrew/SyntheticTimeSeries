@@ -7,13 +7,13 @@ readonly BASE_DIR="${THIS_DIR}/.."
 readonly MODELS_DIR="${BASE_DIR}/timeseries_models"
 readonly RESULTS_DIR="${BASE_DIR}/results"
 
-readonly TIMESERIES_MODELS='E1_p4/clus_or_variance_1/cross_cov_0/cw_hard_meanprior0.1_nsq'
+readonly TIMESERIES_MODELS='cw_hard temporal_hard'
 
 readonly EXPERIMENTS='Online'
-readonly DATASETS='E1_p4/clus_or_variance_1/cross_cov_0'
+readonly DATASETS='E1_fixednoise/base_noise_1/clus_or_variance_0.5/cross_cov_0/temp_or_variance_0/window_size_4 E1_fixednoise/base_noise_1/clus_or_variance_1/cross_cov_0/temp_or_variance_0/window_size_4 E1_fixednoise/base_noise_1/clus_or_variance_1.5/cross_cov_0/temp_or_variance_0/window_size_4 E1_fixednoise/base_noise_1/clus_or_variance_2/cross_cov_0/temp_or_variance_0/window_size_4 '
 
 declare -A MODEL_OPTIONS
-MODEL_OPTIONS[test_experiment]='-D sgd.learningrate=1.0 -D sgd.maxiterations=2000'
+MODEL_OPTIONS[test_experiment]='-D sgd.learningrate=1.0 -D sgd.maxiterations=4000'
 
 readonly INFERENCE_OPTIONS='-D sgd.extension=ADAM -D sgd.inversescaleexp=1.5 -D inference.initialvalue=ATOM -D partialgrounding.powerset=true -D reasoner.tolerance=1e-9f'
 readonly STANDARD_OPTIONS=''
@@ -66,8 +66,8 @@ function run() {
         experiment_options="${MODEL_OPTIONS[${model_name}]} ${STANDARD_OPTIONS} ${INFERENCE_OPTIONS}"
 
         # cp model and data files to cli directory
-        cp "${MODELS_DIR}/${model_name}/hts.psl" "${BASE_DIR}/cli/hts.psl"
-        cp "${MODELS_DIR}/${model_name}/hts-eval.data" "${BASE_DIR}/cli/hts-eval.data"
+        cp "${MODELS_DIR}/${dataset}/${model_name}/hts.psl" "${BASE_DIR}/cli/hts.psl"
+        cp "${MODELS_DIR}/${dataset}/${model_name}/hts-eval.data" "${BASE_DIR}/cli/hts-eval.data"
 
         if [[ -e "${out_path}" ]]; then
           echo "Output file already exists, skipping: ${out_path}"
