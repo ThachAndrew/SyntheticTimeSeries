@@ -307,8 +307,8 @@ def oracle_series_predicate(series_list, series_ids, start_index, end_index, noi
 
     for series in series_list:
         for x in range(len(series)):
-            std = np.std(series[x])
-            series[x] += np.random.normal(scale=noise_sigma * std)
+            var = np.var(series[x])
+            series[x] += np.random.normal(scale=noise_sigma * var)
 
             # Might be necessary to clip depending on the amount of noise added.
             series[x] = np.clip(series[x], 0, 1)
