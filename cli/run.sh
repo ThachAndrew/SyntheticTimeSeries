@@ -3,70 +3,115 @@
 # Options can also be passed on the command line.
 # These options are blind-passed to the CLI.
 # Ex: ./run.sh -D log4j.threshold=DEBUG
-readonly DATA_DIR_ROOT='../data/'
-readonly STOP_COMMAND_FILE='./stop_command.txt'
+
+readonly PSL_VERSION='2.3.0-SNAPSHOT'
+readonly JAR_PATH="./psl-cli-${PSL_VERSION}.jar"
+readonly FETCH_DATA_SCRIPT='../data/fetchData.sh'
+readonly BASE_NAME='hts'
+
+readonly ADDITIONAL_PSL_OPTIONS='--int-ids --postgres psl -D log4j.threshold=TRACE -D runtimestats.collect=true'
+readonly ADDITIONAL_EVAL_OPTIONS='--infer'
 
 function main() {
-   trap cleanup SIGINT SIGTERM
+   trap exit SIGINT
+
+   # Get the data
+   getData
+
+   # Make sure we can run PSL.
+   check_requirements
+   fetch_psl
 
    # Run PSL
-   runAll "$@"
+   runEvaluation "$@"
 }
 
-function runAll() {
-   local experiment=$1
-   local dataset=$2
-   
-   local data_dir="${DATA_DIR_ROOT}/${dataset}/eval/"
-   # Make sure previous run of server didn't leave tmp file.
-   # Get default tmp directory.
-   if [ "$(echo /tmp/onlinePSLServer*)" != "/tmp/onlinePSLServer*" ]; then
-     rm -r /tmp/onlinePSLServer*
+function getData() {
+   pushd . > /dev/null
+
+   cd "$(dirname $FETCH_DATA_SCRIPT)"
+   bash "$(basename $FETCH_DATA_SCRIPT)"
+
+   popd > /dev/null
+}
+
+function runEvaluation() {
+   echo "Running PSL Inference"
+
+   java -jar "${JAR_PATH}" --model "${BASE_NAME}.psl" --data "${BASE_NAME}-eval.data" --output inferred-predicates ${ADDITIONAL_EVAL_OPTIONS} ${ADDITIONAL_PSL_OPTIONS} "$@"
+   if [[ "$?" -ne 0 ]]; then
+      echo 'ERROR: Failed to run infernce'
+      exit 70
+   fi
+}
+
+function check_requirements() {
+   local hasWget
+   local hasCurl
+
+   type wget > /dev/null 2> /dev/null
+   hasWget=$?
+
+   type curl > /dev/null 2> /dev/null
+   hasCurl=$?
+
+   if [[ "${hasWget}" -ne 0 ]] && [[ "${hasCurl}" -ne 0 ]]; then
+      echo 'ERROR: wget or curl required to download dataset'
+      exit 10
    fi
 
-   echo "Running Online Server"
-   ./run_server.sh "${@:3}" > out_server.txt 2> out_server.err &
-   local server_pid=$!
-
-   echo "Running Online Client"
-   for fold_dir in "${data_dir}"/*; do
-     run_client "${fold_dir}/commands.txt" "./client_output/$(basename ${fold_dir})"
-   done
-
-   # Stop the server.
-   run_client "${STOP_COMMAND_FILE}" "./client_output/stop"
-
-   # The server takes time to write inferred predicates and shut down after stopping.
-   echo "Waiting on Online Server: $(date)"
-   wait ${server_pid}
-   echo "Finished Waiting on Online Server $(date)"
-   date
+   type java > /dev/null 2> /dev/null
+   if [[ "$?" -ne 0 ]]; then
+      echo 'ERROR: java required to run project'
+      exit 13
+   fi
 }
 
-function run_client() {
-    local command_file=$1
-    local output_dir=$2
+function get_fetch_command() {
+   type curl > /dev/null 2> /dev/null
+   if [[ "$?" -eq 0 ]]; then
+      echo "curl -o"
+      return
+   fi
 
-    mkdir -p "${output_dir}"
+   type wget > /dev/null 2> /dev/null
+   if [[ "$?" -eq 0 ]]; then
+      echo "wget -O"
+      return
+   fi
 
-    # Set the commands location in run_client.sh.
-    sed -i "s@^readonly COMMAND_FILE=.*'\$@readonly COMMAND_FILE='${command_file}'@g" run_client.sh
-
-    # Set the server response location in run_client.sh.
-    sed -i "s@^readonly SERVER_RESPONSE_OUTPUT=.*'\$@readonly SERVER_RESPONSE_OUTPUT='${output_dir}/serverResponses.txt'@g" run_client.sh
-
-    # Run the client. The client will wait until the server closes the socket.
-    # This happens after the EXIT or STOP action is executed.
-    ./run_client.sh "$@" > "${output_dir}"/out_client.txt 2> "${output_dir}"/out_client.err
+   echo 'ERROR: wget or curl not found'
+   exit 20
 }
 
-function cleanup() {
-  for pid in $(jobs -p); do
-    pkill -P ${pid}
-    kill ${pid}
-  done
-  pkill -P $$
-  exit
+function fetch_file() {
+   local url=$1
+   local path=$2
+   local name=$3
+
+   if [[ -e "${path}" ]]; then
+      echo "${name} file found cached, skipping download."
+      return
+   fi
+
+   echo "Downloading ${name} file located at: '${url}'."
+   `get_fetch_command` "${path}" "${url}"
+   if [[ "$?" -ne 0 ]]; then
+      echo "ERROR: Failed to download ${name} file"
+      exit 30
+   fi
+}
+
+# Fetch the jar from a remote or local location and put it in this directory.
+# Snapshots are fetched from the local maven repo and other builds are fetched remotely.
+function fetch_psl() {
+   if [[ $PSL_VERSION == *'SNAPSHOT'* ]]; then
+      local snapshotJARPath="$HOME/.m2/repository/org/linqs/psl-cli/${PSL_VERSION}/psl-cli-${PSL_VERSION}.jar"
+      cp "${snapshotJARPath}" "${JAR_PATH}"
+   else
+      local remoteJARURL="https://repo1.maven.org/maven2/org/linqs/psl-cli/${PSL_VERSION}/psl-cli-${PSL_VERSION}.jar"
+      fetch_file "${remoteJARURL}" "${JAR_PATH}" 'psl-jar'
+   fi
 }
 
 main "$@"

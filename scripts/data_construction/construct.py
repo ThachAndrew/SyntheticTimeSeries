@@ -229,6 +229,11 @@ def build_psl_data(generated_series, noisy_series, coefs_and_biases, cluster_ora
         predicate_constructors.series_predicate(generated_series, series_ids, start_time_step, end_time_step,
                                                 os.path.join(forecast_window_dir, "Series_target.txt"),
                                                 include_values=False)
+        
+        predicate_constructors.series_predicate(noisy_series, series_ids, start_time_step - window_size, start_time_step - 1,
+                                                os.path.join(forecast_window_dir, "Series_obs.txt"),
+                                                include_values=True)
+
 
         predicate_constructors.series_predicate(generated_series, series_ids, start_time_step, end_time_step,
                                                 os.path.join(forecast_window_dir, "Series_truth.txt"),
@@ -287,7 +292,7 @@ def fit_ar_models(generated_series, start_idx, end_idx, p):
 
 # Generate hierarchical time series PSL models and data files.
 def gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, model_name, lags, temporal_hierarchical_rule_weight=1.0, cluster_hierarchical_rule_weight=1.0,
-                  temporal_rules=True, cluster_rules=False, cluster_hard=False, mean_hard=False, series_mean_prior=False, series_mean_prior_weight=1.0, series_mean_prior_squared=True):
+                  temporal_rules=False, cluster_rules=False, cluster_hard=False, mean_hard=False, series_mean_prior=False, series_mean_prior_weight=1.0, series_mean_prior_squared=False):
     if not os.path.exists(os.path.join(MODEL_PATH, experiment_name_dir, str(model_name))):
         os.makedirs(os.path.join(MODEL_PATH, experiment_name_dir, str(model_name)))
 
@@ -303,11 +308,10 @@ def gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, model
         hts_model_lines = "##\n\n"
 
     if cluster_rules:
-        hts_model_lines += "Series(+S, T) / |S| = ClusterMean(C, T). {S: SeriesCluster(S, C)} \n"
-        if not cluster_hard:
-            hts_model_lines += str(cluster_hierarchical_rule_weight) + ": ClusterMean(C, T) = ClusterOracle(C, T) ^2\n"
+        if cluster_hard:
+            hts_model_lines += "Series(+S, T) / |S| = ClusterOracle(C, T) . {S: SeriesCluster(S, C)} \n"
         else:
-            hts_model_lines += "ClusterMean(C, T) = ClusterOracle(C, T) .\n"
+            hts_model_lines += str(cluster_hierarchical_rule_weight) + ": Series(+S, T) / |S| = ClusterOracle(C, T) {S: SeriesCluster(S, C)} \n" 
 
         # Add AR rules
     for series_idx in range(len(generated_series)):
@@ -339,10 +343,8 @@ def gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, model
 
     hts_data_lines += """   Series/2: open
    OracleSeries/2: closed
-   AggSeries/2: open
    IsInWindow/2: closed
    SeriesBlock/2: closed
-   ClusterMean/2: open
    SeriesCluster/2: closed
    ClusterOracle/2: closed
    SeriesMean/1: closed
@@ -444,108 +446,28 @@ def set_up_experiment(exp_name, series_count, p, cluster_size, post_noise_var, e
     gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_10", lags,
                   temporal_hierarchical_rule_weight=0.0,
                   cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True)
+                  cluster_rules=True, cluster_hard=False)
 
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_5", lags,
+    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_10_meanprior0.1nsq", lags,
                   temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=5.0,
-                  cluster_rules=True)
-
+                  cluster_hierarchical_rule_weight=10.0,
+                  cluster_rules=True, cluster_hard=False, series_mean_prior=True, series_mean_prior_weight=0.1)
+    
     gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "temporal_hard", lags,
                   temporal_hierarchical_rule_weight=0.0,
                   cluster_hierarchical_rule_weight=10.0,
                   cluster_rules=False, mean_hard=True)
 
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "temporal_hard_meanprior0.1_nsq", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=False, mean_hard=True, series_mean_prior=True, series_mean_prior_squared=False)
 
     gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard", lags,
                   temporal_hierarchical_rule_weight=0.0,
                   cluster_hierarchical_rule_weight=10.0,
                   cluster_rules=True, cluster_hard=True)
 
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_meanprior1", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, series_mean_prior=True)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_meanprior0.1", lags,
+    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_meanprior0.1nsq", lags,
                   temporal_hierarchical_rule_weight=0.0,
                   cluster_hierarchical_rule_weight=10.0,
                   cluster_rules=True, cluster_hard=True, series_mean_prior=True, series_mean_prior_weight=0.1)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_meanprior0.1_nsq", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, series_mean_prior=True, series_mean_prior_weight=0.1, series_mean_prior_squared=False)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_100_meanprior0.1", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=100.0,
-                  cluster_rules=True, cluster_hard=False, series_mean_prior=True, series_mean_prior_weight=0.1)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_10_meanprior0.1", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=False, series_mean_prior=True, series_mean_prior_weight=0.1)
-
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_5_meanprior0.1", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=5.0,
-                  cluster_rules=True, cluster_hard=False, series_mean_prior=True, series_mean_prior_weight=0.1)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_meanprior0.1_nonsq", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, series_mean_prior=True, series_mean_prior_weight=0.1, series_mean_prior_squared=False)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_meanprior0.2", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, series_mean_prior=True, series_mean_prior_weight=0.2)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_meanprior0.01", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, series_mean_prior=True, series_mean_prior_weight=0.01)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_tw_hard_ns_meanprior0.1", lags,
-                  temporal_hierarchical_rule_weight=10.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, mean_hard=True, series_mean_prior=True, series_mean_prior_weight=0.1, series_mean_prior_squared=False)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_tw_10_meanprior0.1", lags,
-                  temporal_hierarchical_rule_weight=10.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, mean_hard=False, series_mean_prior=True, series_mean_prior_weight=0.1, series_mean_prior_squared=False)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_meanprior10", lags,
-                  temporal_hierarchical_rule_weight=0.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, series_mean_prior=True, series_mean_prior_weight=10)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_hard_combined", lags,
-                  temporal_hierarchical_rule_weight=10.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=True, mean_hard=True)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "tw_hard_l1_prior", lags,
-                  temporal_hierarchical_rule_weight=10.0,
-                  cluster_hierarchical_rule_weight=0.0,
-                  cluster_rules=False, cluster_hard=False, mean_hard=True, series_mean_prior=True, series_mean_prior_weight=0.1, series_mean_prior_squared=False)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_10_tw_10", lags,
-                  temporal_hierarchical_rule_weight=10.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=False, mean_hard=False)
-
-    gen_hts_model(generated_series, coefs_and_biases, experiment_name_dir, "cw_10_tw_10_meanprior", lags,
-                  temporal_hierarchical_rule_weight=10.0,
-                  cluster_hierarchical_rule_weight=10.0,
-                  cluster_rules=True, cluster_hard=False, mean_hard=False, series_mean_prior=True)
 
     options_file_handle = open(os.path.join(DATA_PATH, experiment_name_dir, "options.txt"), "w")
     options_file_lines = "p\t" + str(p) + "\nwindow_size\t" + str(window_size) + \
@@ -582,10 +504,9 @@ def main():
 
     p = 2
 
-
-    post_noise_stds = [1]
+    post_noise_stds = [0, 0.5, 1, 1.5, 2]
     cross_covs = [0]
-    forecast_variance_scales = [0.5, 1, 1.5, 2]
+    forecast_variance_scales = [0]
     temp_or_variances = [0]
     forecast_window_sizes = [4]
     initial_segment_size = 1000
@@ -593,7 +514,7 @@ def main():
     num_forecast_windows = 30
 
     #exp_name = "E1_p" + str(p)
-    exp_name = "E1_fixednoise"
+    exp_name = "E2_basenoise"
 
     exp1_dirs = ""
 

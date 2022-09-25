@@ -83,9 +83,9 @@ def cluster_mean_predicate(cluster_series_map, start_timestep, end_timestep, out
 
 def sim_agg_forecast(cluster_series, t, h, z, forecast_variance_scale):
     agg_series = np.sum(cluster_series, axis=0)
-    agg_var = np.var(agg_series[:z])
+    agg_std = np.std(agg_series[:z])
 
-    sigma = forecast_variance_scale * agg_var
+    sigma = forecast_variance_scale * agg_std
 
     forecast_window_truth = agg_series[t:t+h]
 
@@ -306,9 +306,9 @@ def oracle_series_predicate(series_list, series_ids, start_index, end_index, noi
     out_file_lines = ""
 
     for series in series_list:
+        std = np.std(series)
         for x in range(len(series)):
-            var = np.var(series[x])
-            series[x] += np.random.normal(scale=noise_sigma * var)
+            series[x] += np.random.normal(scale=noise_sigma * std)
 
             # Might be necessary to clip depending on the amount of noise added.
             series[x] = np.clip(series[x], 0, 1)

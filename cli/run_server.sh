@@ -9,7 +9,7 @@ readonly JAR_PATH="./psl-server-cli-${PSL_VERSION}.jar"
 readonly FETCH_DATA_SCRIPT='../data/fetchData.sh'
 readonly BASE_NAME='hts'
 
-readonly ADDITIONAL_PSL_OPTIONS='--int-ids -D inference.online=true --postgres psl -D runtimestats.collect=true'
+readonly ADDITIONAL_PSL_OPTIONS='--int-ids -D inference.online=true --postgres psl -D runtimestats.collect=true -D partialgrounding.powerset=true'
 readonly ADDITIONAL_EVAL_OPTIONS='--infer=SGDOnlineInference'
 readonly ADDITIONAL_SERVER_OPTIONS='-D log4j.threshold=TRACE'
 
